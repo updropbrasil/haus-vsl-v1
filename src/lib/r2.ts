@@ -1,3 +1,5 @@
+import { S3Client, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudflareR2Credentials } from '../types';
 
 export interface CleanR2Config {
@@ -58,7 +60,138 @@ export function sanitizeR2Credentials(
 }
 
 /**
- * Testa as credenciais e conexão com o Bucket R2 via rota backend /api/r2/test
+ * Testa as credenciais R2 diretamente no navegador (Client-Side) via AWS S3 SDK
+ */
+export async function testR2CredentialsClientSide(
+  cleanCreds: CleanR2Config
+): Promise<{ success: boolean; message: string }> {
+  if (!cleanCreds.accountId || !cleanCreds.accessKeyId || !cleanCreds.secretAccessKey || !cleanCreds.bucketName) {
+    return {
+      success: false,
+      message: 'Credenciais R2 incompletas (Account ID, Access Key ID, Secret Access Key e Nome do Bucket são obrigatórios).',
+    };
+  }
+
+  try {
+    const endpoint = `https://${cleanCreds.accountId}.r2.cloudflarestorage.com`;
+    const s3Client = new S3Client({
+      region: 'auto',
+      endpoint,
+      credentials: {
+        accessKeyId: cleanCreds.accessKeyId,
+        secretAccessKey: cleanCreds.secretAccessKey,
+      },
+    });
+
+    let testSuccess = false;
+    let lastError: any = null;
+
+    // 1. Tenta ListObjectsV2
+    try {
+      await s3Client.send(new ListObjectsV2Command({ Bucket: cleanCreds.bucketName, MaxKeys: 1 }));
+      testSuccess = true;
+    } catch (err: any) {
+      lastError = err;
+    }
+
+    // 2. Se ListObjectsV2 falhar (ex: token criado apenas com permissão de "Object Read & Write"), tenta um PutObject + DeleteObject ping
+    if (!testSuccess) {
+      try {
+        const testKey = `.r2-test-ping-${Date.now()}.txt`;
+        await s3Client.send(
+          new PutObjectCommand({
+            Bucket: cleanCreds.bucketName,
+            Key: testKey,
+            Body: 'r2-ping',
+            ContentType: 'text/plain',
+          })
+        );
+        testSuccess = true;
+        s3Client.send(new DeleteObjectCommand({ Bucket: cleanCreds.bucketName, Key: testKey })).catch(() => {});
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+
+    if (testSuccess) {
+      return {
+        success: true,
+        message: `✅ Conexão com o bucket "${cleanCreds.bucketName}" no Cloudflare R2 autenticada e validada com sucesso!`,
+      };
+    }
+
+    const err = lastError;
+    const rawMessage = err?.message || (typeof err === 'string' ? err : '');
+    const combined = `${err?.name || ''} ${rawMessage}`.toLowerCase();
+
+    if (combined.includes('cors') || combined.includes('network') || combined.includes('failed to fetch')) {
+      return {
+        success: false,
+        message: `Erro de CORS no navegador ao conectar com o Cloudflare R2. Acesse a aba "Configurações R2" para copiar o JSON de CORS e colar no painel da Cloudflare.`,
+      };
+    }
+
+    if (combined.includes('accessdenied') || combined.includes('forbidden') || combined.includes('403')) {
+      return {
+        success: false,
+        message: `Permissão insuficiente no Token R2 (Status 403 - Access Denied). Certifique-se de que o Token R2 foi criado com permissão "Admin Read & Write" ou "Object Read & Write" no bucket "${cleanCreds.bucketName}".`,
+      };
+    }
+
+    return {
+      success: false,
+      message: rawMessage || `Falha ao autenticar no Cloudflare R2. Verifique o Account ID, Access Key ID e Secret Access Key.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message || 'Erro de conexão diretamente com o Cloudflare R2.',
+    };
+  }
+}
+
+/**
+ * Gerador de Presigned URL no navegador (Client-Side)
+ */
+export async function generatePresignedUrlClientSide(
+  cleanCreds: CleanR2Config,
+  fileName: string,
+  contentType: string
+): Promise<{ presignedUrl: string; publicUrl: string; fileKey: string }> {
+  const endpoint = `https://${cleanCreds.accountId}.r2.cloudflarestorage.com`;
+  const s3Client = new S3Client({
+    region: 'auto',
+    endpoint,
+    credentials: {
+      accessKeyId: cleanCreds.accessKeyId,
+      secretAccessKey: cleanCreds.secretAccessKey,
+    },
+  });
+
+  const cleanFileName = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9.]+/g, '-')
+    .replace(/-+/g, '-');
+
+  const timestamp = Date.now();
+  const fileKey = cleanCreds.folderPath
+    ? `${cleanCreds.folderPath}/${timestamp}-${cleanFileName}`
+    : `${timestamp}-${cleanFileName}`;
+
+  const command = new PutObjectCommand({
+    Bucket: cleanCreds.bucketName,
+    Key: fileKey,
+    ContentType: contentType || 'video/mp4',
+  });
+
+  const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  const publicUrl = `${cleanCreds.publicDomain}/${fileKey}`;
+
+  return { presignedUrl, publicUrl, fileKey };
+}
+
+/**
+ * Testa as credenciais e conexão com o Bucket R2 via rota backend /api/r2/test com fallback no navegador
  */
 export async function testR2CredentialsServer(
   rawCreds: Partial<CloudflareR2Credentials>
@@ -84,49 +217,31 @@ export async function testR2CredentialsServer(
       }),
     });
 
-    const text = await res.text();
-    let data: any = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch {
-      return {
-        success: false,
-        message: 'O servidor respondeu com formato não-JSON. Aguarde o servidor inicializar e tente novamente.',
-      };
-    }
-
-    if (res.ok && data.success) {
-      return { success: true, message: data.message };
-    } else {
-      let errMsg =
-        data.error ||
-        data.message ||
-        data.errMsg ||
-        (typeof data === 'string' ? data : null);
-
-      if (!errMsg) {
-        if (res.status === 405) {
-          errMsg = `Falha de Permissão do Token R2 (Status HTTP 405 - Method Not Allowed): O Token do Cloudflare R2 não possui permissão para consultar/listar este bucket. No painel da Cloudflare (R2 > Manage R2 API Tokens), crie um novo Token de API com permissão "Admin Read & Write" ou "Object Read & Write" no bucket "${cleanCreds.bucketName}".`;
-        } else if (res.status === 403) {
-          errMsg = `Permissão insuficiente no Token R2 (Status HTTP 403 - Access Denied). Certifique-se de que o Token R2 tem permissões de leitura/escrita no bucket "${cleanCreds.bucketName}".`;
-        } else {
-          errMsg = `Falha na autenticação R2 (Status HTTP ${res.status}).`;
-        }
+    if (res.ok) {
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = {};
       }
-
-      return { success: false, message: errMsg };
+      if (data.success) {
+        return { success: true, message: data.message };
+      } else if (data.error || data.message) {
+        return { success: false, message: data.error || data.message };
+      }
     }
-  } catch (err: any) {
-    return {
-      success: false,
-      message: err?.message || 'Erro ao conectar com o servidor para testar o R2.',
-    };
+
+    // Se o backend responder com 404/405/erro (ex: em hosts estáticos), tenta o teste direto do lado do cliente
+    return await testR2CredentialsClientSide(cleanCreds);
+  } catch {
+    return await testR2CredentialsClientSide(cleanCreds);
   }
 }
 
 /**
  * Realiza o upload para o Cloudflare R2 utilizando presigned URL de upload direto do navegador.
- * Isso garante transmissão ultrarrápida de arquivos grandes sem travar no servidor!
+ * Suporta execuções via backend Express ou fallbacks direct client-side no navegador!
  */
 export async function uploadFileToR2(
   file: File,
@@ -169,9 +284,10 @@ export async function uploadFileToR2(
     };
   }
 
-  // Tenta obter URL assinada para Upload Direto (Presigned PUT)
+  // Obter URL assinada para Upload Direto (Presigned PUT)
+  let presignData: any = {};
   try {
-    log(`🔑 Gerando URL pré-assinada de upload direto com o servidor...`);
+    log(`🔑 Solicitando URL pré-assinada de upload direto...`);
     const presignRes = await fetch('/api/r2/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -187,81 +303,89 @@ export async function uploadFileToR2(
       }),
     });
 
-    const presignText = await presignRes.text();
-    let presignData: any = {};
-    try {
+    if (presignRes.ok) {
+      const presignText = await presignRes.text();
       presignData = presignText ? JSON.parse(presignText) : {};
-    } catch {
-      presignData = {};
     }
-
-    if (presignRes.ok && presignData.success && presignData.presignedUrl) {
-      log(`📡 Conexão aberta! Transmitindo diretamente do navegador para o R2...`);
-
-      return new Promise((resolve) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('PUT', presignData.presignedUrl);
-        xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-
-        if (xhr.upload) {
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable && e.total > 0) {
-              const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
-              if (onProgress) onProgress(pct);
-              log(`⬆️ Transmitindo para o Cloudflare R2: ${pct}% (${(e.loaded / (1024 * 1024)).toFixed(1)} MB / ${(e.total / (1024 * 1024)).toFixed(1)} MB)`);
-            }
-          };
-        }
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            if (onProgress) onProgress(100);
-            log(`✅ Upload concluído com sucesso e salvo no R2!`);
-            log(`🔗 URL pública do vídeo: ${presignData.publicUrl}`);
-            resolve({ success: true, publicUrl: presignData.publicUrl });
-          } else {
-            log(`❌ Erro HTTP ${xhr.status} no upload direto R2.`);
-            resolve({
-              success: false,
-              publicUrl: defaultPublicUrl,
-              error: `O Cloudflare R2 retornou status ${xhr.status}. Verifique se as permissões da chave R2 permitem a ação PutObject.`,
-            });
-          }
-        };
-
-        xhr.onerror = () => {
-          log(`❌ Erro de CORS ou Rede ao enviar diretamente para o R2.`);
-          log(`💡 SOLUÇÃO: Adicione a URL deste app na política de CORS do seu Bucket R2 no painel Cloudflare! (Veja a aba Configurações R2 para copiar a regra pronta)`);
-          
-          // Tenta fallback via proxy do servidor para arquivos pequenos (< 30MB)
-          if (file.size < 30 * 1024 * 1024) {
-            log(`🔄 Tentando envio alternativo via servidor proxy...`);
-            uploadViaServerProxy(file, cleanCreds, onProgress, log)
-              .then(resolve)
-              .catch(() => resolve({
-                success: false,
-                publicUrl: defaultPublicUrl,
-                error: 'Erro de CORS no navegador. Adicione as URLs da aplicação nas configurações de CORS do seu bucket Cloudflare R2.',
-              }));
-          } else {
-            resolve({
-              success: false,
-              publicUrl: defaultPublicUrl,
-              error: 'Erro de CORS ao enviar para o R2. Acesse a aba "Configurações R2" no menu do app para copiar a regra CORS JSON e colar no seu bucket Cloudflare.',
-            });
-          }
-        };
-
-        xhr.send(file);
-      });
-    } else {
-      log(`⚠️ Falha ao obter presigned URL: ${presignData.error || 'Erro desconhecido'}`);
-    }
-  } catch (err: any) {
-    log(`⚠️ Erro ao tentar presigned upload: ${err?.message}`);
+  } catch {
+    presignData = {};
   }
 
-  // Fallback via Server Proxy se presign falhar
+  // Se a rota presign no servidor não respondeu ou falhou (ex: deploy em host estático), gera no navegador!
+  if (!presignData || !presignData.presignedUrl) {
+    try {
+      log(`⚡ Gerando URL pré-assinada diretamente no navegador...`);
+      presignData = await generatePresignedUrlClientSide(
+        cleanCreds,
+        file.name,
+        file.type || 'video/mp4'
+      );
+    } catch (err: any) {
+      log(`⚠️ Falha ao gerar URL pré-assinada no navegador: ${err?.message}`);
+    }
+  }
+
+  if (presignData && presignData.presignedUrl) {
+    log(`📡 Conexão aberta! Transmitindo diretamente do navegador para o R2...`);
+
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', presignData.presignedUrl);
+      xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+
+      if (xhr.upload) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
+            if (onProgress) onProgress(pct);
+            log(`⬆️ Transmitindo para o Cloudflare R2: ${pct}% (${(e.loaded / (1024 * 1024)).toFixed(1)} MB / ${(e.total / (1024 * 1024)).toFixed(1)} MB)`);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (onProgress) onProgress(100);
+          log(`✅ Upload concluído com sucesso e salvo no R2!`);
+          log(`🔗 URL pública do vídeo: ${presignData.publicUrl}`);
+          resolve({ success: true, publicUrl: presignData.publicUrl });
+        } else {
+          log(`❌ Erro HTTP ${xhr.status} no upload direto R2.`);
+          resolve({
+            success: false,
+            publicUrl: defaultPublicUrl,
+            error: `O Cloudflare R2 retornou status ${xhr.status}. Verifique se as permissões do Token R2 permitem a ação PutObject.`,
+          });
+        }
+      };
+
+      xhr.onerror = () => {
+        log(`❌ Erro de CORS ou Rede ao enviar diretamente para o R2.`);
+        log(`💡 SOLUÇÃO: Adicione a regra de CORS no seu Bucket R2 no painel Cloudflare (veja a aba Configurações R2 no app).`);
+        
+        if (file.size < 30 * 1024 * 1024) {
+          log(`🔄 Tentando envio alternativo via servidor proxy...`);
+          uploadViaServerProxy(file, cleanCreds, onProgress, log)
+            .then(resolve)
+            .catch(() => resolve({
+              success: false,
+              publicUrl: defaultPublicUrl,
+              error: 'Erro de CORS no navegador. Adicione as URLs da aplicação nas configurações de CORS do seu bucket Cloudflare R2.',
+            }));
+        } else {
+          resolve({
+            success: false,
+            publicUrl: defaultPublicUrl,
+            error: 'Erro de CORS ao enviar para o R2. Acesse a aba "Configurações R2" no menu do app para copiar a regra CORS JSON e colar no seu bucket Cloudflare.',
+          });
+        }
+      };
+
+      xhr.send(file);
+    });
+  }
+
+  // Fallback via Server Proxy se presign falhar completamente
   log(`🔄 Usando rota alternativa de servidor...`);
   return uploadViaServerProxy(file, cleanCreds, onProgress, log);
 }

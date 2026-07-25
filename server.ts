@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import multer from 'multer';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, HeadBucketCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import { createServer as createViteServer } from 'vite';
@@ -227,23 +227,31 @@ async function startServer() {
       let testSuccess = false;
       let lastError: any = null;
 
-      // 1. Tenta HeadBucketCommand (Valida se o bucket existe e as credenciais são aceitas)
+      // 1. Tenta ListObjectsV2Command (Listar conteúdo do bucket)
       try {
-        await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }));
+        await s3Client.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1 }));
         testSuccess = true;
       } catch (err: any) {
         lastError = err;
-        console.warn('[R2 TEST ROUTE] HeadBucket falhou, tentando ListObjectsV2:', err?.message || err);
+        console.warn('[R2 TEST ROUTE] ListObjectsV2 falhou:', err?.message || err);
       }
 
-      // 2. Se HeadBucket falhar, tenta ListObjectsV2Command
+      // 2. Se ListObjectsV2 falhar (ex: token criado com apenas permissão "Object Read & Write"), tenta PutObject e DeleteObject de teste
       if (!testSuccess) {
         try {
-          await s3Client.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1 }));
+          const testKey = `.r2-test-ping-${Date.now()}.txt`;
+          await s3Client.send(new PutObjectCommand({
+            Bucket: bucketName,
+            Key: testKey,
+            Body: 'r2-ping',
+            ContentType: 'text/plain',
+          }));
           testSuccess = true;
+          // Deleta o arquivo de teste imediatamente
+          s3Client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: testKey })).catch(() => {});
         } catch (err: any) {
           lastError = err;
-          console.warn('[R2 TEST ROUTE] ListObjectsV2 falhou:', err?.message || err);
+          console.warn('[R2 TEST ROUTE] PutObject ping falhou:', err?.message || err);
         }
       }
 
@@ -264,13 +272,6 @@ async function startServer() {
       let errMsg = rawMessage || errName || 'Erro de autenticação ou conexão com o R2.';
 
       if (
-        httpStatusCode === 405 ||
-        combined.includes('405') ||
-        combined.includes('methodnotallowed') ||
-        combined.includes('method not allowed')
-      ) {
-        errMsg = `Falha de Permissão do Token R2 (Status HTTP 405 - Method Not Allowed): O Token do Cloudflare R2 não possui permissão para consultar/listar este bucket. No painel da Cloudflare (R2 > Manage R2 API Tokens), recrie o Token selecionando as permissões "Admin Read & Write" ou "Object Read & Write" aplicadas ao bucket "${bucketName}".`;
-      } else if (
         httpStatusCode === 403 ||
         combined.includes('accessdenied') ||
         combined.includes('forbidden')
