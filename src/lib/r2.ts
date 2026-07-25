@@ -227,31 +227,43 @@ export async function testR2CredentialsServer(
 
     let data: any = null;
     try {
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        data = await res.json();
+      const text = await res.text();
+      if (text) {
+        data = JSON.parse(text);
       }
     } catch {}
 
-    // Se o backend respondeu com dados JSON (seja sucesso ou erro 400/500/200), usa a resposta oficial do servidor!
-    if (data && typeof data.success === 'boolean') {
-      return {
-        success: data.success,
-        message: data.message || data.error || (data.success ? 'Conectado ao R2 com sucesso!' : 'Erro na autenticação com o R2.'),
-      };
+    if (data) {
+      if (typeof data.success === 'boolean') {
+        return {
+          success: data.success,
+          message: data.message || data.error || (data.success ? 'Conectado ao Cloudflare R2 com sucesso!' : 'Erro na autenticação com o R2.'),
+        };
+      }
+      if (data.error || data.message) {
+        return {
+          success: false,
+          message: data.error || data.message,
+        };
+      }
     }
 
-    if (data && (data.error || data.message)) {
+    if (!res.ok) {
       return {
         success: false,
-        message: data.error || data.message,
+        message: `O servidor backend retornou erro HTTP ${res.status} ao testar a conexão com o Cloudflare R2.`,
       };
     }
 
-    // Apenas se o servidor for um host estático puro (ex: GitHub Pages/Netlify sem backend) que retorna 404/HTML, tenta no navegador
-    return await testR2CredentialsClientSide(cleanCreds);
-  } catch {
-    return await testR2CredentialsClientSide(cleanCreds);
+    return {
+      success: false,
+      message: 'Resposta inesperada do servidor ao testar as credenciais do R2.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Falha na comunicação com o servidor: ${err?.message || 'Erro de rede.'}`,
+    };
   }
 }
 
@@ -376,25 +388,15 @@ export async function uploadFileToR2(
       };
 
       xhr.onerror = () => {
-        log(`❌ Erro de CORS ou Rede ao enviar diretamente para o R2.`);
-        log(`💡 SOLUÇÃO: Copie a regra de CORS na aba "Configurações R2" e cole no seu bucket Cloudflare.`);
+        log(`⚠️ Conexão direta com o R2 bloqueada por CORS no navegador. Redirecionando para o servidor proxy...`);
         
-        if (file.size < 30 * 1024 * 1024) {
-          log(`🔄 Tentando envio alternativo via servidor proxy...`);
-          uploadViaServerProxy(file, cleanCreds, onProgress, log)
-            .then(resolve)
-            .catch(() => resolve({
-              success: false,
-              publicUrl: defaultPublicUrl,
-              error: 'Erro de CORS no navegador. Adicione a regra de CORS no seu bucket Cloudflare R2.',
-            }));
-        } else {
-          resolve({
+        uploadViaServerProxy(file, cleanCreds, onProgress, log)
+          .then(resolve)
+          .catch(() => resolve({
             success: false,
             publicUrl: defaultPublicUrl,
-            error: 'Erro de CORS ao enviar para o R2. Acesse a aba "Configurações R2" para copiar o JSON de CORS e colar no Cloudflare.',
-          });
-        }
+            error: 'Erro de CORS no navegador e falha no servidor proxy. Adicione a regra de CORS no seu bucket Cloudflare R2.',
+          }));
       };
 
       xhr.send(file);
