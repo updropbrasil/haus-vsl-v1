@@ -238,10 +238,11 @@ export async function testR2CredentialsServer(
       });
     }
 
+    let text = '';
     let data: any = null;
     try {
-      const text = await res.text();
-      if (text) {
+      text = await res.text();
+      if (text && (text.trim().startsWith('{') || text.trim().startsWith('['))) {
         data = JSON.parse(text);
       }
     } catch {}
@@ -261,22 +262,10 @@ export async function testR2CredentialsServer(
       }
     }
 
-    if (!res.ok) {
-      return {
-        success: false,
-        message: `O servidor backend retornou o status HTTP ${res.status} ao testar as credenciais com o Cloudflare R2.`,
-      };
-    }
-
-    return {
-      success: false,
-      message: 'Não foi possível interpretar a resposta do servidor de teste.',
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: `Erro de conexão com o servidor ao testar credenciais: ${err?.message || 'Falha na requisição'}.`,
-    };
+    // Se o backend não respondeu com JSON (ex: resposta estática), tenta a validação direto do navegador
+    return await testR2CredentialsClientSide(cleanCreds);
+  } catch {
+    return await testR2CredentialsClientSide(cleanCreds);
   }
 }
 

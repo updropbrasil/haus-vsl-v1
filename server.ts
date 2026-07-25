@@ -50,7 +50,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '100mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
   // Middleware CORS para suportar requisições em qualquer ambiente (Preview, Deployed, Custom Domain, iframe)
   app.use((req, res, next) => {
@@ -331,6 +332,18 @@ async function startServer() {
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
+  });
+
+  // Middleware de tratamento de erro para rotas da API (Garante respostas estritamente em JSON)
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith('/api/') || req.url.startsWith('/api/')) {
+      console.error('[API SERVER ERROR]', err);
+      return res.status(err.status || 500).json({
+        success: false,
+        error: err.message || 'Erro interno no servidor de API.',
+      });
+    }
+    next(err);
   });
 
   // Vite Middleware para desenvolvimento
