@@ -261,7 +261,13 @@ export async function testR2CredentialsServer(
       }
     }
 
-    // Se por algum motivo o backend servidor não retornar JSON (ex: servidor estático em ambiente isolado), faz o teste cliente
+    if (!res.ok) {
+      return {
+        success: false,
+        message: `O servidor backend retornou o status HTTP ${res.status} ao testar as credenciais com o Cloudflare R2.`,
+      };
+    }
+
     return await testR2CredentialsClientSide(cleanCreds);
   } catch {
     return await testR2CredentialsClientSide(cleanCreds);
@@ -269,8 +275,8 @@ export async function testR2CredentialsServer(
 }
 
 /**
- * Realiza o upload para o Cloudflare R2 utilizando presigned URL de upload direto do navegador.
- * Suporta execuções via backend Express ou fallbacks direct client-side no navegador!
+ * Realiza o upload para o Cloudflare R2.
+ * Prioriza o servidor backend Node.js (imune a erros de CORS do navegador) e oferece fallback de presigned URL.
  */
 export async function uploadFileToR2(
   file: File,
@@ -313,10 +319,18 @@ export async function uploadFileToR2(
     };
   }
 
-  // Obter URL assinada para Upload Direto (Presigned PUT)
+  // 1. Tenta envio através do Servidor Backend Express (imune a CORS do navegador)
+  log(`📡 Transmitindo arquivo via servidor backend Node.js (imune a bloqueios de CORS)...`);
+  const proxyResult = await uploadViaServerProxy(file, cleanCreds, onProgress, log);
+  if (proxyResult.success) {
+    return proxyResult;
+  }
+
+  log(`⚠️ Servidor proxy indisponível (${proxyResult.error}). Tentando envio com URL Pré-assinada...`);
+
+  // 2. Fallback: Presigned URL direto do navegador
   let presignData: any = {};
   try {
-    log(`🔑 Solicitando URL pré-assinada de upload direto...`);
     let presignRes = await fetch('/api/r2/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -356,7 +370,6 @@ export async function uploadFileToR2(
     presignData = {};
   }
 
-  // Se a rota presign no servidor não respondeu ou falhou (ex: deploy em host estático), gera no navegador!
   if (!presignData || !presignData.presignedUrl) {
     try {
       log(`⚡ Gerando URL pré-assinada diretamente no navegador...`);
@@ -371,8 +384,6 @@ export async function uploadFileToR2(
   }
 
   if (presignData && presignData.presignedUrl) {
-    log(`📡 Conexão aberta! Transmitindo diretamente do navegador para o R2...`);
-
     return new Promise((resolve) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', presignData.presignedUrl);
@@ -399,30 +410,28 @@ export async function uploadFileToR2(
           resolve({
             success: false,
             publicUrl: defaultPublicUrl,
-            error: `O Cloudflare R2 retornou status ${xhr.status}. Verifique se as permissões do Token R2 permitem a ação PutObject.`,
+            error: `O Cloudflare R2 retornou status ${xhr.status}. Verifique se o Token R2 possui permissão de escrita.`,
           });
         }
       };
 
       xhr.onerror = () => {
-        log(`⚠️ Conexão direta com o R2 bloqueada por CORS no navegador. Redirecionando para o servidor proxy...`);
-        
-        uploadViaServerProxy(file, cleanCreds, onProgress, log)
-          .then(resolve)
-          .catch(() => resolve({
-            success: false,
-            publicUrl: defaultPublicUrl,
-            error: 'Erro de CORS no navegador e falha no servidor proxy. Adicione a regra de CORS no seu bucket Cloudflare R2.',
-          }));
+        resolve({
+          success: false,
+          publicUrl: defaultPublicUrl,
+          error: 'Erro de CORS no navegador ao enviar diretamente para o Cloudflare R2.',
+        });
       };
 
       xhr.send(file);
     });
   }
 
-  // Fallback via Server Proxy se presign falhar completamente
-  log(`🔄 Usando rota alternativa de servidor...`);
-  return uploadViaServerProxy(file, cleanCreds, onProgress, log);
+  return {
+    success: false,
+    publicUrl: defaultPublicUrl,
+    error: 'Não foi possível realizar o upload para o Cloudflare R2.',
+  };
 }
 
 /**
