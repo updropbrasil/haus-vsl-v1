@@ -214,7 +214,7 @@ export async function testR2CredentialsServer(
   }
 
   try {
-    const res = await fetch('/api/r2/test', {
+    let res = await fetch('/api/r2/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -224,6 +224,19 @@ export async function testR2CredentialsServer(
         bucketName: cleanCreds.bucketName,
       }),
     });
+
+    // Se o servidor retornar 405 Method Not Allowed ou 404 (ex: proxy de servidor estático), tenta com GET
+    if (res.status === 405 || res.status === 404) {
+      const params = new URLSearchParams({
+        accountId: cleanCreds.accountId,
+        accessKeyId: cleanCreds.accessKeyId,
+        secretAccessKey: cleanCreds.secretAccessKey,
+        bucketName: cleanCreds.bucketName,
+      });
+      res = await fetch(`/api/r2/test?${params.toString()}`, {
+        method: 'GET',
+      });
+    }
 
     let data: any = null;
     try {
@@ -248,22 +261,10 @@ export async function testR2CredentialsServer(
       }
     }
 
-    if (!res.ok) {
-      return {
-        success: false,
-        message: `O servidor backend retornou erro HTTP ${res.status} ao testar a conexão com o Cloudflare R2.`,
-      };
-    }
-
-    return {
-      success: false,
-      message: 'Resposta inesperada do servidor ao testar as credenciais do R2.',
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: `Falha na comunicação com o servidor: ${err?.message || 'Erro de rede.'}`,
-    };
+    // Se por algum motivo o backend servidor não retornar JSON (ex: servidor estático em ambiente isolado), faz o teste cliente
+    return await testR2CredentialsClientSide(cleanCreds);
+  } catch {
+    return await testR2CredentialsClientSide(cleanCreds);
   }
 }
 
@@ -316,7 +317,7 @@ export async function uploadFileToR2(
   let presignData: any = {};
   try {
     log(`🔑 Solicitando URL pré-assinada de upload direto...`);
-    const presignRes = await fetch('/api/r2/presign', {
+    let presignRes = await fetch('/api/r2/presign', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -330,6 +331,22 @@ export async function uploadFileToR2(
         contentType: file.type || 'video/mp4',
       }),
     });
+
+    if (presignRes.status === 405 || presignRes.status === 404) {
+      const params = new URLSearchParams({
+        accountId: cleanCreds.accountId,
+        accessKeyId: cleanCreds.accessKeyId,
+        secretAccessKey: cleanCreds.secretAccessKey,
+        bucketName: cleanCreds.bucketName,
+        folderPath: cleanCreds.folderPath,
+        publicDomain: cleanCreds.publicDomain,
+        fileName: file.name,
+        contentType: file.type || 'video/mp4',
+      });
+      presignRes = await fetch(`/api/r2/presign?${params.toString()}`, {
+        method: 'GET',
+      });
+    }
 
     if (presignRes.ok) {
       const presignText = await presignRes.text();

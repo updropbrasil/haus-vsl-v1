@@ -52,16 +52,30 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
 
+  // Middleware CORS para suportar requisições em qualquer ambiente (Preview, Deployed, Custom Domain, iframe)
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+    next();
+  });
+
   // API Route para Gerar Presigned URL para Upload Direto
-  app.post('/api/r2/presign', async (req, res) => {
+  app.all('/api/r2/presign', async (req, res) => {
     try {
-      const accountId = cleanAccountId(req.body.accountId);
-      const accessKeyId = req.body.accessKeyId?.trim();
-      const secretAccessKey = req.body.secretAccessKey?.trim();
-      const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(req.body.bucketName, req.body.folderPath);
-      let publicDomain = (req.body.publicDomain || 'https://pub-vsl-optima.r2.dev').trim().replace(/\/+$/, '');
-      const fileName = req.body.fileName?.trim();
-      const contentType = req.body.contentType?.trim() || 'video/mp4';
+      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string);
+      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string)?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string)?.trim();
+      const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
+        req.body?.bucketName || req.query?.bucketName as string,
+        req.body?.folderPath || req.query?.folderPath as string
+      );
+      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string) || 'https://pub-vsl-optima.r2.dev').trim().replace(/\/+$/, '');
+      const fileName = (req.body?.fileName || req.query?.fileName as string)?.trim();
+      const contentType = (req.body?.contentType || req.query?.contentType as string)?.trim() || 'video/mp4';
 
       if (!accountId || !accessKeyId || !secretAccessKey || !bucketName || !fileName) {
         return res.status(400).json({
