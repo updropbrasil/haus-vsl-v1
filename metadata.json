@@ -1,0 +1,8 @@
+{
+  "name": "Remix: VSL Analytics \u0026 Player",
+  "description": "Painel de controle e analytics de retenção de VSLs com player inteligente de alta conversão.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

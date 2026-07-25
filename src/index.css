@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* MODO CLARO ELEGANTE & DE ALTO CONTRASTE */
+html[data-theme="light"] {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html[data-theme="light"] body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Painel Principal e Fundo de Páginas */
+html[data-theme="light"] .bg-neutral-950 {
+  background-color: #f8fafc !important;
+}
+
+/* Cards e Seções em Branco Limpo */
+html[data-theme="light"] .bg-neutral-900 {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="light"] .bg-neutral-900\/90,
+html[data-theme="light"] .bg-neutral-900\/80 {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+}
+
+html[data-theme="light"] .bg-neutral-950\/90,
+html[data-theme="light"] .bg-neutral-950\/80,
+html[data-theme="light"] .bg-neutral-950\/60 {
+  background-color: rgba(248, 250, 252, 0.9) !important;
+}
+
+/* Bordas em tom neutro suave */
+html[data-theme="light"] .border-neutral-800,
+html[data-theme="light"] .border-neutral-700,
+html[data-theme="light"] .border-neutral-800\/80 {
+  border-color: #e2e8f0 !important;
+}
+
+/* Adaptar textos em cards claros sem afetar botões coloridos */
+html[data-theme="light"] h1,
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] h4,
+html[data-theme="light"] .text-neutral-100 {
+  color: #0f172a !important;
+}
+
+html[data-theme="light"] .text-neutral-200,
+html[data-theme="light"] .text-neutral-300 {
+  color: #334155 !important;
+}
+
+html[data-theme="light"] .text-neutral-400,
+html[data-theme="light"] .text-neutral-500 {
+  color: #64748b !important;
+}
+
+html[data-theme="light"] .bg-neutral-850,
+html[data-theme="light"] .bg-neutral-800 {
+  background-color: #f1f5f9 !important;
+}
+
+/* Inputs & Modais em Modo Claro */
+html[data-theme="light"] input:not([type="checkbox"]):not([type="range"]),
+html[data-theme="light"] select,
+html[data-theme="light"] textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html[data-theme="light"] select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* GARANTIR QUE BOTÕES COLORIDOS, BADGES E O PLAYER MANTENHAM TEXTO CLARO VISÍVEL */
+html[data-theme="light"] .bg-indigo-600,
+html[data-theme="light"] .bg-indigo-500,
+html[data-theme="light"] .bg-emerald-600,
+html[data-theme="light"] .bg-emerald-500,
+html[data-theme="light"] .bg-rose-600,
+html[data-theme="light"] .bg-rose-500,
+html[data-theme="light"] .bg-amber-500,
+html[data-theme="light"] .bg-amber-600,
+html[data-theme="light"] .vsl-player-container,
+html[data-theme="light"] .vsl-player-container * {
+  color: initial;
+}
+
+html[data-theme="light"] .bg-indigo-600 *,
+html[data-theme="light"] .bg-indigo-500 *,
+html[data-theme="light"] .bg-emerald-600 *,
+html[data-theme="light"] .bg-emerald-500 *,
+html[data-theme="light"] .bg-rose-600 *,
+html[data-theme="light"] .bg-rose-500 * {
+  color: #ffffff !important;
+}
+
+.vsl-player-container {
+  background-color: #050505 !important;
+}
+
+
