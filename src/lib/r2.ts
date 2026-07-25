@@ -268,9 +268,15 @@ export async function testR2CredentialsServer(
       };
     }
 
-    return await testR2CredentialsClientSide(cleanCreds);
-  } catch {
-    return await testR2CredentialsClientSide(cleanCreds);
+    return {
+      success: false,
+      message: 'Não foi possível interpretar a resposta do servidor de teste.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Erro de conexão com o servidor ao testar credenciais: ${err?.message || 'Falha na requisição'}.`,
+    };
   }
 }
 
