@@ -211,7 +211,7 @@ async function startServer() {
   });
 
   // API Route para Testar Conexão e Credenciais do Cloudflare R2 diretamente
-  app.all('/api/r2/test', async (req, res) => {
+  app.all(['/api/r2/test', '/api/r2/test-credentials'], async (req, res) => {
     try {
       const rawAccountId = req.body?.accountId || req.query?.accountId as string || '';
       const rawAccessKeyId = req.body?.accessKeyId || req.query?.accessKeyId as string || '';

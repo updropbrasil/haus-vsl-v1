@@ -225,7 +225,7 @@ export async function testR2CredentialsServer(
       }),
     });
 
-    // Se o servidor retornar 405 Method Not Allowed ou 404 (ex: proxy de servidor estático), tenta com GET
+    // Se a rota POST falhar com 404/405, tenta GET em /api/r2/test-credentials
     if (res.status === 405 || res.status === 404) {
       const params = new URLSearchParams({
         accountId: cleanCreds.accountId,
@@ -233,7 +233,7 @@ export async function testR2CredentialsServer(
         secretAccessKey: cleanCreds.secretAccessKey,
         bucketName: cleanCreds.bucketName,
       });
-      res = await fetch(`/api/r2/test?${params.toString()}`, {
+      res = await fetch(`/api/r2/test-credentials?${params.toString()}`, {
         method: 'GET',
       });
     }
@@ -262,10 +262,25 @@ export async function testR2CredentialsServer(
       }
     }
 
-    // Se o backend não respondeu com JSON (ex: resposta estática), tenta a validação direto do navegador
-    return await testR2CredentialsClientSide(cleanCreds);
-  } catch {
-    return await testR2CredentialsClientSide(cleanCreds);
+    // Se o backend retornou resposta mas sem JSON legível
+    if (!res.ok) {
+      return {
+        success: false,
+        message: `O servidor de teste respondeu com status HTTP ${res.status}. Verifique as credenciais no painel do Cloudflare.`,
+      };
+    }
+
+    const clientRes = await testR2CredentialsClientSide(cleanCreds);
+    return clientRes;
+  } catch (err: any) {
+    const clientRes = await testR2CredentialsClientSide(cleanCreds);
+    if (!clientRes.success && clientRes.message.includes('CORS')) {
+      return {
+        success: false,
+        message: `Não foi possível validar as credenciais. Verifique se o Account ID ("${cleanCreds.accountId}"), a Access Key ID e a Secret Access Key estão corretos e sem espaços em branco.`,
+      };
+    }
+    return clientRes;
   }
 }
 
