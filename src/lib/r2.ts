@@ -127,7 +127,7 @@ export async function testR2CredentialsClientSide(
     if (combined.includes('cors') || combined.includes('network') || combined.includes('failed to fetch')) {
       return {
         success: false,
-        message: `Erro de CORS no navegador ao conectar com o Cloudflare R2. Acesse a aba "Configurações R2" para copiar o JSON de CORS e colar no painel da Cloudflare.`,
+        message: `Bloqueio de CORS no navegador ao acessar o R2. No painel Cloudflare (R2 > Bucket "${cleanCreds.bucketName}" > Settings > CORS Policy), cole a regra JSON autorizando AllowedOrigins: ["*"].`,
       };
     }
 
@@ -191,7 +191,7 @@ export async function generatePresignedUrlClientSide(
 }
 
 /**
- * Testa as credenciais e conexão com o Bucket R2 via rota backend /api/r2/test com fallback no navegador
+ * Testa as credenciais e conexão com o Bucket R2 via rota backend /api/r2/test com fallback inteligente
  */
 export async function testR2CredentialsServer(
   rawCreds: Partial<CloudflareR2Credentials>
@@ -217,22 +217,23 @@ export async function testR2CredentialsServer(
       }),
     });
 
-    if (res.ok) {
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = {};
-      }
-      if (data.success) {
-        return { success: true, message: data.message };
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      if (typeof data.success === 'boolean') {
+        return {
+          success: data.success,
+          message: data.message || data.error || (data.success ? 'Conectado ao R2!' : 'Erro na autenticação com o R2.'),
+        };
       } else if (data.error || data.message) {
-        return { success: false, message: data.error || data.message };
+        return {
+          success: false,
+          message: data.error || data.message,
+        };
       }
     }
 
-    // Se o backend responder com 404/405/erro (ex: em hosts estáticos), tenta o teste direto do lado do cliente
+    // Apenas tenta no navegador se o backend for um 404 estático sem API endpoint
     return await testR2CredentialsClientSide(cleanCreds);
   } catch {
     return await testR2CredentialsClientSide(cleanCreds);
@@ -361,7 +362,7 @@ export async function uploadFileToR2(
 
       xhr.onerror = () => {
         log(`❌ Erro de CORS ou Rede ao enviar diretamente para o R2.`);
-        log(`💡 SOLUÇÃO: Adicione a regra de CORS no seu Bucket R2 no painel Cloudflare (veja a aba Configurações R2 no app).`);
+        log(`💡 SOLUÇÃO: Copie a regra de CORS na aba "Configurações R2" e cole no seu bucket Cloudflare.`);
         
         if (file.size < 30 * 1024 * 1024) {
           log(`🔄 Tentando envio alternativo via servidor proxy...`);
@@ -370,13 +371,13 @@ export async function uploadFileToR2(
             .catch(() => resolve({
               success: false,
               publicUrl: defaultPublicUrl,
-              error: 'Erro de CORS no navegador. Adicione as URLs da aplicação nas configurações de CORS do seu bucket Cloudflare R2.',
+              error: 'Erro de CORS no navegador. Adicione a regra de CORS no seu bucket Cloudflare R2.',
             }));
         } else {
           resolve({
             success: false,
             publicUrl: defaultPublicUrl,
-            error: 'Erro de CORS ao enviar para o R2. Acesse a aba "Configurações R2" no menu do app para copiar a regra CORS JSON e colar no seu bucket Cloudflare.',
+            error: 'Erro de CORS ao enviar para o R2. Acesse a aba "Configurações R2" para copiar o JSON de CORS e colar no Cloudflare.',
           });
         }
       };
