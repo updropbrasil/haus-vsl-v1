@@ -146,7 +146,7 @@ export async function testR2CredentialsClientSide(
     if (combined.includes('cors') || combined.includes('network') || combined.includes('failed to fetch')) {
       return {
         success: false,
-        message: `Bloqueio de CORS no navegador ao acessar o R2. Certifique-se de que no painel da Cloudflare (R2 > Bucket "${cleanCreds.bucketName}" > Settings > CORS Policy) o campo "AllowedHeaders" inclui ["*"] e "AllowedOrigins" inclui ["*"].`,
+        message: `Falha ao conectar diretamente do navegador ao Cloudflare R2. Verifique se o Account ID ("${cleanCreds.accountId}") está correto e se a Regra de CORS no bucket "${cleanCreds.bucketName}" permite chamadas do navegador.`,
       };
     }
 
@@ -198,7 +198,8 @@ export async function generatePresignedUrlClientSide(
 }
 
 /**
- * Testa as credenciais e conexão com o Bucket R2 via rota backend /api/r2/test com fallback inteligente
+ * Testa as credenciais e conexão com o Bucket R2 via rota backend /api/r2/test (Servidor Node.js)
+ * O teste no servidor não possui restrições de CORS e é 100% confiável no ambiente do aplicativo.
  */
 export async function testR2CredentialsServer(
   rawCreds: Partial<CloudflareR2Credentials>
@@ -224,26 +225,30 @@ export async function testR2CredentialsServer(
       }),
     });
 
-    const contentType = res.headers.get('content-type') || '';
-    if (res.ok && contentType.includes('application/json')) {
-      const data = await res.json();
-      if (typeof data.success === 'boolean') {
-        return {
-          success: data.success,
-          message: data.message || data.error || (data.success ? 'Conectado ao R2!' : 'Erro na autenticação com o R2.'),
-        };
+    let data: any = null;
+    try {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
       }
-    } else if (contentType.includes('application/json')) {
-      const data = await res.json();
-      if (data.error || data.message) {
-        return {
-          success: false,
-          message: data.error || data.message,
-        };
-      }
+    } catch {}
+
+    // Se o backend respondeu com dados JSON (seja sucesso ou erro 400/500/200), usa a resposta oficial do servidor!
+    if (data && typeof data.success === 'boolean') {
+      return {
+        success: data.success,
+        message: data.message || data.error || (data.success ? 'Conectado ao R2 com sucesso!' : 'Erro na autenticação com o R2.'),
+      };
     }
 
-    // Se o backend for um servidor estático sem API endpoint (404/HTML), realiza o teste via Presigned URL do cliente
+    if (data && (data.error || data.message)) {
+      return {
+        success: false,
+        message: data.error || data.message,
+      };
+    }
+
+    // Apenas se o servidor for um host estático puro (ex: GitHub Pages/Netlify sem backend) que retorna 404/HTML, tenta no navegador
     return await testR2CredentialsClientSide(cleanCreds);
   } catch {
     return await testR2CredentialsClientSide(cleanCreds);
