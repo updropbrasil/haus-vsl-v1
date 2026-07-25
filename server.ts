@@ -140,11 +140,14 @@ async function startServer() {
         return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
       }
 
-      const accountId = cleanAccountId(req.body.accountId);
-      const accessKeyId = req.body.accessKeyId?.trim();
-      const secretAccessKey = req.body.secretAccessKey?.trim();
-      const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(req.body.bucketName, req.body.folderPath);
-      let publicDomain = (req.body.publicDomain || 'https://pub-vsl-optima.r2.dev').trim().replace(/\/+$/, '');
+      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string);
+      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string)?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string)?.trim();
+      const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
+        req.body?.bucketName || req.query?.bucketName as string,
+        req.body?.folderPath || req.query?.folderPath as string
+      );
+      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string) || 'https://pub-vsl-optima.r2.dev').trim().replace(/\/+$/, '');
 
       if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
         return res.status(400).json({

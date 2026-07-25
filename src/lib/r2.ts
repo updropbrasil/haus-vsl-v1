@@ -447,17 +447,27 @@ async function uploadViaServerProxy(
   
   return new Promise((resolve) => {
     try {
+      // Importante: Para o Multer processar corretamente no Node.js, os campos de texto DEVEM vir ANTES do arquivo!
       const formData = new FormData();
-      formData.append('file', file);
       formData.append('accountId', cleanCreds.accountId);
       formData.append('accessKeyId', cleanCreds.accessKeyId);
       formData.append('secretAccessKey', cleanCreds.secretAccessKey);
       formData.append('bucketName', cleanCreds.bucketName);
       formData.append('folderPath', cleanCreds.folderPath);
       formData.append('publicDomain', cleanCreds.publicDomain);
+      formData.append('file', file);
+
+      const params = new URLSearchParams({
+        accountId: cleanCreds.accountId,
+        accessKeyId: cleanCreds.accessKeyId,
+        secretAccessKey: cleanCreds.secretAccessKey,
+        bucketName: cleanCreds.bucketName,
+        folderPath: cleanCreds.folderPath,
+        publicDomain: cleanCreds.publicDomain,
+      });
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/r2/upload');
+      xhr.open('POST', `/api/r2/upload?${params.toString()}`);
 
       if (xhr.upload && onProgress) {
         xhr.upload.onprogress = (e) => {
@@ -476,19 +486,24 @@ async function uploadViaServerProxy(
             if (log) log(`✅ Upload concluído via servidor proxy! URL: ${data.publicUrl}`);
             resolve({ success: true, publicUrl: data.publicUrl });
           } else {
-            resolve({ success: false, publicUrl: defaultPublicUrl, error: data.error || 'Erro no servidor' });
+            const errDetail = data.error || `Erro HTTP ${xhr.status}`;
+            if (log) log(`❌ Falha no servidor proxy (${xhr.status}): ${errDetail}`);
+            resolve({ success: false, publicUrl: defaultPublicUrl, error: errDetail });
           }
         } catch {
+          if (log) log(`❌ Erro no formato de resposta do servidor (HTTP ${xhr.status}).`);
           resolve({ success: false, publicUrl: defaultPublicUrl, error: 'Resposta inválida do servidor.' });
         }
       };
 
       xhr.onerror = () => {
+        if (log) log(`❌ Erro de conexão com o servidor proxy.`);
         resolve({ success: false, publicUrl: defaultPublicUrl, error: 'Erro de conexão com o servidor de upload.' });
       };
 
       xhr.send(formData);
     } catch (err: any) {
+      if (log) log(`❌ Exceção ao enviar para o servidor proxy: ${err?.message}`);
       resolve({ success: false, publicUrl: defaultPublicUrl, error: err?.message || 'Falha no upload.' });
     }
   });
