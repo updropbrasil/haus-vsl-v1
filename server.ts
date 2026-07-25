@@ -227,31 +227,30 @@ async function startServer() {
       let testSuccess = false;
       let lastError: any = null;
 
-      // 1. Tenta ListObjectsV2Command (Listar conteúdo do bucket)
+      // Testa a criação e remoção de um objeto de teste no R2 (PutObject + DeleteObject)
+      // Funciona com TODOS os tipos de token R2 ("Admin Read & Write" e "Object Read & Write")
       try {
-        await s3Client.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1 }));
+        const testKey = `.r2-test-ping-${Date.now()}.txt`;
+        await s3Client.send(new PutObjectCommand({
+          Bucket: bucketName,
+          Key: testKey,
+          Body: 'r2-ping-test',
+          ContentType: 'text/plain',
+        }));
         testSuccess = true;
+
+        // Limpa o arquivo de teste imediatamente em segundo plano
+        s3Client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: testKey })).catch(() => {});
       } catch (err: any) {
         lastError = err;
-        console.warn('[R2 TEST ROUTE] ListObjectsV2 falhou:', err?.message || err);
-      }
+        console.warn('[R2 TEST ROUTE] PutObject ping falhou:', err?.message || err);
 
-      // 2. Se ListObjectsV2 falhar (ex: token criado com apenas permissão "Object Read & Write"), tenta PutObject e DeleteObject de teste
-      if (!testSuccess) {
+        // Fallback secundário: Tenta ListObjectsV2 se PutObject falhar
         try {
-          const testKey = `.r2-test-ping-${Date.now()}.txt`;
-          await s3Client.send(new PutObjectCommand({
-            Bucket: bucketName,
-            Key: testKey,
-            Body: 'r2-ping',
-            ContentType: 'text/plain',
-          }));
+          await s3Client.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1 }));
           testSuccess = true;
-          // Deleta o arquivo de teste imediatamente
-          s3Client.send(new DeleteObjectCommand({ Bucket: bucketName, Key: testKey })).catch(() => {});
-        } catch (err: any) {
-          lastError = err;
-          console.warn('[R2 TEST ROUTE] PutObject ping falhou:', err?.message || err);
+        } catch (listErr: any) {
+          console.warn('[R2 TEST ROUTE] ListObjectsV2 também falhou:', listErr?.message || listErr);
         }
       }
 

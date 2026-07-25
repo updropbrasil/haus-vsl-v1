@@ -1,4 +1,4 @@
-import { S3Client, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { CloudflareR2Credentials } from '../types';
 
@@ -60,7 +60,9 @@ export function sanitizeR2Credentials(
 }
 
 /**
- * Testa as credenciais R2 diretamente no navegador (Client-Side) via AWS S3 SDK
+ * Testa as credenciais R2 diretamente no navegador (Client-Side) via Presigned URL de Teste.
+ * NOTA: O Cloudflare R2 APLICA regras de CORS do Bucket em Presigned URLs de objeto,
+ * enquanto chamadas diretas de controle S3 (ListObjectsV2) no navegador são bloqueadas por padrão.
  */
 export async function testR2CredentialsClientSide(
   cleanCreds: CleanR2Config
@@ -73,6 +75,7 @@ export async function testR2CredentialsClientSide(
   }
 
   try {
+    const testKey = `.r2-test-ping-${Date.now()}.txt`;
     const endpoint = `https://${cleanCreds.accountId}.r2.cloudflarestorage.com`;
     const s3Client = new S3Client({
       region: 'auto',
@@ -83,69 +86,73 @@ export async function testR2CredentialsClientSide(
       },
     });
 
-    let testSuccess = false;
-    let lastError: any = null;
+    // 1. Gera Presigned URL para teste de envio (PutObject)
+    const putCommand = new PutObjectCommand({
+      Bucket: cleanCreds.bucketName,
+      Key: testKey,
+      ContentType: 'text/plain',
+    });
 
-    // 1. Tenta ListObjectsV2
-    try {
-      await s3Client.send(new ListObjectsV2Command({ Bucket: cleanCreds.bucketName, MaxKeys: 1 }));
-      testSuccess = true;
-    } catch (err: any) {
-      lastError = err;
-    }
+    const presignedUrl = await getSignedUrl(s3Client, putCommand, { expiresIn: 300 });
 
-    // 2. Se ListObjectsV2 falhar (ex: token criado apenas com permissão de "Object Read & Write"), tenta um PutObject + DeleteObject ping
-    if (!testSuccess) {
+    // 2. Faz o teste com a Presigned URL (Ativa o tratamento de CORS do Bucket Cloudflare R2!)
+    const putRes = await fetch(presignedUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+      body: 'r2-ping-test',
+    });
+
+    if (putRes.ok || putRes.status === 200 || putRes.status === 204) {
+      // Deleta o arquivo temporário de teste
       try {
-        const testKey = `.r2-test-ping-${Date.now()}.txt`;
-        await s3Client.send(
-          new PutObjectCommand({
-            Bucket: cleanCreds.bucketName,
-            Key: testKey,
-            Body: 'r2-ping',
-            ContentType: 'text/plain',
-          })
-        );
-        testSuccess = true;
-        s3Client.send(new DeleteObjectCommand({ Bucket: cleanCreds.bucketName, Key: testKey })).catch(() => {});
-      } catch (err: any) {
-        lastError = err;
-      }
-    }
+        const delCommand = new DeleteObjectCommand({
+          Bucket: cleanCreds.bucketName,
+          Key: testKey,
+        });
+        const delPresignedUrl = await getSignedUrl(s3Client, delCommand, { expiresIn: 300 });
+        fetch(delPresignedUrl, { method: 'DELETE' }).catch(() => {});
+      } catch {}
 
-    if (testSuccess) {
       return {
         success: true,
         message: `✅ Conexão com o bucket "${cleanCreds.bucketName}" no Cloudflare R2 autenticada e validada com sucesso!`,
       };
     }
 
-    const err = lastError;
+    if (putRes.status === 403) {
+      return {
+        success: false,
+        message: `Permissão insuficiente no Token R2 ou credenciais incorretas (Status 403 - Access Denied). Verifique se o Token R2 foi criado com permissão "Admin Read & Write" ou "Object Read & Write" no bucket "${cleanCreds.bucketName}".`,
+      };
+    }
+
+    if (putRes.status === 404) {
+      return {
+        success: false,
+        message: `O bucket "${cleanCreds.bucketName}" ou Account ID não foi encontrado no Cloudflare R2.`,
+      };
+    }
+
+    return {
+      success: false,
+      message: `O Cloudflare R2 retornou status HTTP ${putRes.status}. Verifique as credenciais e o nome do bucket "${cleanCreds.bucketName}".`,
+    };
+  } catch (err: any) {
     const rawMessage = err?.message || (typeof err === 'string' ? err : '');
     const combined = `${err?.name || ''} ${rawMessage}`.toLowerCase();
 
     if (combined.includes('cors') || combined.includes('network') || combined.includes('failed to fetch')) {
       return {
         success: false,
-        message: `Bloqueio de CORS no navegador ao acessar o R2. No painel Cloudflare (R2 > Bucket "${cleanCreds.bucketName}" > Settings > CORS Policy), cole a regra JSON autorizando AllowedOrigins: ["*"].`,
-      };
-    }
-
-    if (combined.includes('accessdenied') || combined.includes('forbidden') || combined.includes('403')) {
-      return {
-        success: false,
-        message: `Permissão insuficiente no Token R2 (Status 403 - Access Denied). Certifique-se de que o Token R2 foi criado com permissão "Admin Read & Write" ou "Object Read & Write" no bucket "${cleanCreds.bucketName}".`,
+        message: `Bloqueio de CORS no navegador ao acessar o R2. Certifique-se de que no painel da Cloudflare (R2 > Bucket "${cleanCreds.bucketName}" > Settings > CORS Policy) o campo "AllowedHeaders" inclui ["*"] e "AllowedOrigins" inclui ["*"].`,
       };
     }
 
     return {
       success: false,
-      message: rawMessage || `Falha ao autenticar no Cloudflare R2. Verifique o Account ID, Access Key ID e Secret Access Key.`,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: err?.message || 'Erro de conexão diretamente com o Cloudflare R2.',
+      message: rawMessage || 'Erro de conexão diretamente com o Cloudflare R2.',
     };
   }
 }
@@ -218,14 +225,17 @@ export async function testR2CredentialsServer(
     });
 
     const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    if (res.ok && contentType.includes('application/json')) {
       const data = await res.json();
       if (typeof data.success === 'boolean') {
         return {
           success: data.success,
           message: data.message || data.error || (data.success ? 'Conectado ao R2!' : 'Erro na autenticação com o R2.'),
         };
-      } else if (data.error || data.message) {
+      }
+    } else if (contentType.includes('application/json')) {
+      const data = await res.json();
+      if (data.error || data.message) {
         return {
           success: false,
           message: data.error || data.message,
@@ -233,7 +243,7 @@ export async function testR2CredentialsServer(
       }
     }
 
-    // Apenas tenta no navegador se o backend for um 404 estático sem API endpoint
+    // Se o backend for um servidor estático sem API endpoint (404/HTML), realiza o teste via Presigned URL do cliente
     return await testR2CredentialsClientSide(cleanCreds);
   } catch {
     return await testR2CredentialsClientSide(cleanCreds);
