@@ -690,14 +690,14 @@ async function startServer() {
         return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
       }
 
-      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string || savedServerR2Config?.accountId || '');
-      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string || savedServerR2Config?.accessKeyId || '')?.trim();
-      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string || savedServerR2Config?.secretAccessKey || '')?.trim();
+      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string || savedServerR2Config?.accountId || DEFAULT_R2_CONFIG.accountId);
+      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string || savedServerR2Config?.accessKeyId || DEFAULT_R2_CONFIG.accessKeyId)?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string || savedServerR2Config?.secretAccessKey || DEFAULT_R2_CONFIG.secretAccessKey)?.trim();
       const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
-        req.body?.bucketName || req.query?.bucketName as string || savedServerR2Config?.bucketName || '',
-        req.body?.folderPath || req.query?.folderPath as string || savedServerR2Config?.folderPath || ''
+        req.body?.bucketName || req.query?.bucketName as string || savedServerR2Config?.bucketName || DEFAULT_R2_CONFIG.bucketName,
+        req.body?.folderPath || req.query?.folderPath as string || savedServerR2Config?.folderPath || DEFAULT_R2_CONFIG.folderPath
       );
-      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string || savedServerR2Config?.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev')).trim().replace(/\/+$/, '');
+      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string || savedServerR2Config?.publicDomain || DEFAULT_R2_CONFIG.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev')).trim().replace(/\/+$/, '');
 
       if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
         return res.status(400).json({
