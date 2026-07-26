@@ -64,12 +64,26 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
 
   // Fallback URL state (Se o vídeo principal falhar por adblocker ou rede, muda pro domínio secundário)
   const [usingFallbackUrl, setUsingFallbackUrl] = useState(false);
+  const [hasVideoError, setHasVideoError] = useState(false);
+  const [videoErrorMessage, setVideoErrorMessage] = useState('');
   const activeVideoSrc = usingFallbackUrl && project.secondaryVideoUrl ? project.secondaryVideoUrl : project.videoUrl;
 
   const handleVideoError = () => {
     if (!usingFallbackUrl && project.secondaryVideoUrl) {
       console.warn('⚠️ URL principal do vídeo falhou. Alternando automaticamente para o Domínio Secundário / Reserva!');
       setUsingFallbackUrl(true);
+    } else {
+      setHasVideoError(true);
+      const isMov = activeVideoSrc?.toLowerCase().endsWith('.mov');
+      if (isMov) {
+        setVideoErrorMessage(
+          'Vídeos .MOV de iPhone (codec HEVC/ProRes) não rodam nativamente nos navegadores Chrome/Windows. Converta ou exporte seu vídeo para .MP4 (H.264) para compatibilidade universal.'
+        );
+      } else {
+        setVideoErrorMessage(
+          'Não foi possível carregar o vídeo. Verifique se o bucket R2 possui "Acesso Público" ativado ou se a URL pública do Cloudflare está correta.'
+        );
+      }
     }
   };
 
@@ -96,6 +110,8 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
 
   // Autoplay mudo imediato ao carregar a página / trocar vídeo
   useEffect(() => {
+    setHasVideoError(false);
+    setVideoErrorMessage('');
     if (videoRef.current) {
       videoRef.current.muted = true;
       setIsMuted(true);
@@ -108,7 +124,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           console.warn('Autoplay mudo aguardando interação:', err);
         });
     }
-  }, [project.videoUrl]);
+  }, [activeVideoSrc]);
 
   // Função acionada ao clicar para ativar o som e ir para tela cheia
   const handleUnmuteAndFullscreen = (e?: React.MouseEvent) => {
@@ -482,10 +498,12 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           onClick={!isPublicView ? togglePlay : undefined}
         >
           <video
+            key={activeVideoSrc}
             ref={videoRef}
             src={activeVideoSrc}
             poster={project.thumbnailUrl}
             className="w-full h-full object-contain"
+            preload="auto"
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
             onError={handleVideoError}
@@ -505,8 +523,49 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             {...({ 'webkit-playsinline': 'true', 'x5-playsinline': 'true' } as any)}
           />
 
+          {/* Overlay de Erro no Vídeo */}
+          {hasVideoError && (
+            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-md p-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mb-3">
+                <Flame className="w-6 h-6" />
+              </div>
+              <h4 className="text-white font-extrabold text-sm sm:text-base mb-2">
+                Vídeo Indisponível ou Formato Não Suportado
+              </h4>
+              <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-4">
+                {videoErrorMessage ||
+                  'Não foi possível carregar este vídeo. Verifique se a URL pública do Cloudflare R2 está correta e se o bucket possui Acesso Público (R2.dev Domain ou Subdomínio Ativo).'}
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                {activeVideoSrc && (
+                  <a
+                    href={activeVideoSrc}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-2 border border-neutral-700 transition-all"
+                  >
+                    <ExternalLink className="w-4 h-4 text-indigo-400" />
+                    <span>Testar Link Direto</span>
+                  </a>
+                )}
+                <button
+                  onClick={() => {
+                    setHasVideoError(false);
+                    if (videoRef.current) {
+                      videoRef.current.load();
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Tentar Novamente</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Overlay de Áudio / Smart Unmute com Tela Cheia Automática */}
-          {showSmartUnmuteOverlay && (
+          {showSmartUnmuteOverlay && !hasVideoError && (
             <div
               onClick={handleUnmuteAndFullscreen}
               className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-6 text-center animate-fade-in cursor-pointer select-none group/unmute"
