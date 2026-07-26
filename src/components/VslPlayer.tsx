@@ -62,18 +62,34 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   const [savedTime, setSavedTime] = useState<number | null>(null);
   const [showResumeBanner, setShowResumeBanner] = useState(false);
 
-  // Fallback URL state (Se o vídeo principal falhar por adblocker ou rede, muda pro domínio secundário)
+  // Fallback URL state (Se o vídeo principal falhar por adblocker ou rede, alterna entre streaming e domínio público)
   const [usingFallbackUrl, setUsingFallbackUrl] = useState(false);
+  const [usingStreamUrl, setUsingStreamUrl] = useState(false);
   const [hasVideoError, setHasVideoError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-  const activeVideoSrc = usingFallbackUrl && project.secondaryVideoUrl ? project.secondaryVideoUrl : project.videoUrl;
+
+  let activeVideoSrc = project.videoUrl;
+  if (usingStreamUrl) {
+    const rawKey = project.videoUrl?.includes('key=')
+      ? decodeURIComponent(project.videoUrl.split('key=')[1]?.split('&')[0] || '')
+      : project.videoUrl?.replace(/^https?:\/\/[^/]+\//, '');
+    if (rawKey) {
+      activeVideoSrc = `/api/r2/stream?key=${encodeURIComponent(rawKey)}`;
+    } else if (project.secondaryVideoUrl) {
+      activeVideoSrc = project.secondaryVideoUrl;
+    }
+  } else if (usingFallbackUrl && project.secondaryVideoUrl) {
+    activeVideoSrc = project.secondaryVideoUrl;
+  }
 
   const handleVideoError = () => {
-    if (!usingFallbackUrl && project.secondaryVideoUrl) {
-      console.warn('⚠️ URL principal do vídeo falhou. Alternando automaticamente para o Domínio Secundário!');
+    if (!usingFallbackUrl && project.secondaryVideoUrl && project.secondaryVideoUrl !== activeVideoSrc) {
+      console.warn('⚠️ URL principal do vídeo falhou. Alternando para URL secundária!');
       setUsingFallbackUrl(true);
+    } else if (!usingStreamUrl) {
+      console.warn('⚠️ Alternando para a rota de streaming direto do servidor Express!');
+      setUsingStreamUrl(true);
     } else if (retryCount < 2) {
-      // Tenta recarregar o elemento de vídeo automaticamente antes de exibir mensagem de erro
       console.warn(`🔄 Tentando recarregar o vídeo (tentativa ${retryCount + 1})...`);
       setRetryCount((prev) => prev + 1);
       setTimeout(() => {
@@ -110,7 +126,11 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   // Autoplay mudo imediato ao carregar a página / trocar vídeo
   useEffect(() => {
     setHasVideoError(false);
+    setIsPitchUnlocked(false);
+    setHasStartedPlaying(false);
+    setShowSmartUnmuteOverlay(true);
     if (videoRef.current) {
+      videoRef.current.load();
       videoRef.current.muted = true;
       setIsMuted(true);
       videoRef.current
@@ -132,6 +152,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     // 1. Reiniciar o vídeo do começo (00:00)
     videoRef.current.currentTime = 0;
     setCurrentTime(0);
+    setIsPitchUnlocked(false);
 
     // 2. Desmutar o áudio (Volume 100%)
     videoRef.current.muted = false;
@@ -146,16 +167,14 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
         setIsPlaying(true);
         setShowSmartUnmuteOverlay(false);
         setShowResumeBanner(false);
-        if (!hasStartedPlaying) {
-          setHasStartedPlaying(true);
-          onTrackEvent({
-            vslId: project.id,
-            eventType: 'play',
-            timestampSeconds: 0,
-            percentage: 0,
-            device: window.innerWidth < 768 ? 'Mobile' : 'Desktop',
-          });
-        }
+        setHasStartedPlaying(true);
+        onTrackEvent({
+          vslId: project.id,
+          eventType: 'play',
+          timestampSeconds: 0,
+          percentage: 0,
+          device: window.innerWidth < 768 ? 'Mobile' : 'Desktop',
+        });
       })
       .catch((err) => {
         console.warn('Erro ao reproduzir vídeo:', err);
@@ -272,8 +291,15 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     const videoDur = duration || videoRef.current.duration || 1;
     const currentPercentage = (currentSec / videoDur) * 100;
 
-    // Pitch Unlock check
-    if (project.pitchConfig && currentSec >= project.pitchConfig.pitchTimeSeconds && !isPitchUnlocked) {
+    // Pitch Unlock check (Apenas desbloqueia se o usuário já clicou para assistir com som)
+    if (
+      project.pitchConfig &&
+      hasStartedPlaying &&
+      !showSmartUnmuteOverlay &&
+      !isMuted &&
+      currentSec >= project.pitchConfig.pitchTimeSeconds &&
+      !isPitchUnlocked
+    ) {
       setIsPitchUnlocked(true);
       onTrackEvent({
         vslId: project.id,
@@ -649,10 +675,10 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           )}
 
-          {/* OVERLAY DO BOTÃO DA OFERTA (DENTRO DO PLAYER - CENTRALIZADO E COMPACTO) */}
-          {isPitchUnlocked && (
-            <div className="absolute bottom-12 sm:bottom-16 left-1/2 -translate-x-1/2 z-40 max-w-md w-11/12 p-2 sm:p-3 animate-fade-in pointer-events-auto">
-              <div className="flex flex-col items-center gap-2 text-center">
+          {/* OVERLAY DO BOTÃO DA OFERTA (DENTRO DO PLAYER - COMPACTO E ENQUADRADO PARA MOBILE) */}
+          {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && (
+            <div className="absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-sm sm:max-w-md w-[92%] p-1 sm:p-2 animate-scale-up pointer-events-auto">
+              <div className="flex flex-col items-center gap-1.5 text-center">
                 <a
                   href={project.pitchConfig.ctaUrl}
                   target="_blank"
@@ -666,15 +692,18 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                       device: window.innerWidth < 768 ? 'Mobile' : 'Desktop',
                     });
                   }}
-                  style={{ backgroundColor: project.pitchConfig.ctaButtonColor || '#059669' }}
-                  className="w-full py-3.5 px-6 rounded-xl text-white font-black text-sm sm:text-base shadow-2xl hover:scale-105 active:scale-95 transition-all uppercase tracking-wide cursor-pointer flex items-center justify-center gap-2 border border-white/20"
+                  style={{
+                    backgroundColor: project.pitchConfig.ctaButtonColor || '#059669',
+                    boxShadow: `0 0 25px ${project.pitchConfig.ctaButtonColor || '#059669'}80`,
+                  }}
+                  className="w-full py-2.5 sm:py-3.5 px-3 sm:px-6 rounded-xl text-white font-black text-xs sm:text-base leading-tight shadow-2xl hover:scale-105 active:scale-95 transition-all uppercase tracking-wide cursor-pointer flex items-center justify-center gap-1.5 sm:gap-2 border border-white/30 text-center break-words"
                 >
-                  <span>{project.pitchConfig.ctaText || 'QUERO GARANTIR MINHA VAGA COM DESCONTO'}</span>
-                  <ExternalLink className="w-4 h-4 stroke-[2.5]" />
+                  <span className="line-clamp-2">{project.pitchConfig.ctaText || 'QUERO GARANTIR MINHA VAGA COM DESCONTO'}</span>
+                  <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5] shrink-0" />
                 </a>
 
                 {project.pitchConfig.ctaSubtext && (
-                  <p className="text-xs text-white/90 font-semibold drop-shadow-md bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10 max-w-full truncate">
+                  <p className="text-[10px] sm:text-xs text-white/95 font-bold drop-shadow-md bg-black/80 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/15 max-w-full text-center truncate">
                     {project.pitchConfig.ctaSubtext}
                   </p>
                 )}
@@ -816,11 +845,22 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
         )}
       </div>
 
-      {/* SEÇÃO DO CTA DO PITCH EM TELA NORMAL */}
+      {/* SEÇÃO DO CTA DO PITCH EM TELA NORMAL / MOBILE */}
       <div className="w-full max-w-4xl transition-all duration-700 ease-out">
-        {isPitchUnlocked ? (
-          <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 text-center animate-fade-in flex flex-col items-center justify-center">
-            <div className="max-w-md w-full flex flex-col items-center gap-2.5">
+        {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted ? (
+          <div
+            className="p-4 sm:p-8 rounded-2xl bg-neutral-900/90 border border-emerald-500/40 text-center animate-fade-in flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group"
+            style={{
+              boxShadow: `0 0 40px ${project.pitchConfig.ctaButtonColor || '#059669'}25`,
+            }}
+          >
+            {/* Ambient Background Glow */}
+            <div
+              className="absolute -inset-1 opacity-20 blur-xl pointer-events-none transition-all duration-500 group-hover:opacity-30"
+              style={{ backgroundColor: project.pitchConfig.ctaButtonColor || '#059669' }}
+            />
+
+            <div className="max-w-lg w-full flex flex-col items-center gap-3 relative z-10">
               <a
                 href={project.pitchConfig.ctaUrl}
                 target="_blank"
@@ -834,18 +874,30 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                     device: window.innerWidth < 768 ? 'Mobile' : 'Desktop',
                   });
                 }}
-                style={{ backgroundColor: project.pitchConfig.ctaButtonColor || '#059669' }}
-                className="w-full py-4 px-8 rounded-xl text-white font-black text-base sm:text-lg shadow-xl hover:scale-105 active:scale-95 transition-all uppercase tracking-wide cursor-pointer flex items-center justify-center gap-3"
+                style={{
+                  backgroundColor: project.pitchConfig.ctaButtonColor || '#059669',
+                  boxShadow: `0 10px 30px ${project.pitchConfig.ctaButtonColor || '#059669'}60`,
+                }}
+                className="w-full py-4 sm:py-5 px-5 sm:px-8 rounded-xl text-white font-black text-sm sm:text-lg leading-snug shadow-2xl hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-wide cursor-pointer flex items-center justify-center gap-2.5 sm:gap-3 text-center break-words border border-white/20"
               >
                 <span>{project.pitchConfig.ctaText || 'QUERO GARANTIR MINHA VAGA COM DESCONTO'}</span>
-                <ExternalLink className="w-5 h-5 stroke-[2.5]" />
+                <ExternalLink className="w-5 h-5 stroke-[2.5] shrink-0" />
               </a>
 
               {project.pitchConfig.ctaSubtext && (
-                <p className="text-xs text-neutral-400 font-medium text-center">
+                <p className="text-xs sm:text-sm text-neutral-300 font-semibold text-center leading-relaxed">
                   {project.pitchConfig.ctaSubtext}
                 </p>
               )}
+
+              {/* Selo de Garantia e Segurança para Conversão Mobile */}
+              <div className="flex items-center justify-center gap-3 text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-800/80 w-full">
+                <span className="flex items-center gap-1 text-emerald-400 font-bold">
+                  🔒 Compra 100% Segura
+                </span>
+                <span>•</span>
+                <span>⚡ Acesso Imediato</span>
+              </div>
             </div>
           </div>
         ) : (
@@ -874,6 +926,34 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           )
         )}
       </div>
+
+      {/* BARRA FIXA STICKY CTA NO RODAPÉ MOBILE (Alta Conversão para 98% de Tráfego Mobile) */}
+      {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && isPublicView && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 p-2.5 sm:hidden bg-neutral-950/95 backdrop-blur-xl border-t border-neutral-800/90 shadow-[0_-10px_25px_rgba(0,0,0,0.8)] animate-fade-in pointer-events-auto">
+          <a
+            href={project.pitchConfig.ctaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => {
+              onTrackEvent({
+                vslId: project.id,
+                eventType: 'cta_clicked',
+                timestampSeconds: Math.round(currentTime),
+                percentage: Math.round(realPercentage),
+                device: 'Mobile',
+              });
+            }}
+            style={{
+              backgroundColor: project.pitchConfig.ctaButtonColor || '#059669',
+              boxShadow: `0 0 20px ${project.pitchConfig.ctaButtonColor || '#059669'}90`,
+            }}
+            className="w-full py-3 px-4 rounded-xl text-white font-black text-xs leading-tight shadow-2xl uppercase tracking-wide flex items-center justify-center gap-2 border border-white/25 active:scale-95 transition-transform text-center"
+          >
+            <span className="line-clamp-1">{project.pitchConfig.ctaText || 'QUERO GARANTIR MINHA VAGA COM DESCONTO'}</span>
+            <ExternalLink className="w-4 h-4 stroke-[2.5] shrink-0" />
+          </a>
+        </div>
+      )}
     </div>
   );
 };

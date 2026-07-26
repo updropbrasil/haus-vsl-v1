@@ -24,6 +24,7 @@ import { fetchR2ConfigFromSupabase, saveR2ConfigToSupabase } from '../lib/supaba
 
 interface CloudflareR2ConfigProps {
   onAddProject?: (newProj: VslProject) => void;
+  onProjectsUpdated?: (projects: VslProject[]) => void;
 }
 
 const DEFAULT_R2_CONFIG: CloudflareR2Credentials = {
@@ -35,7 +36,7 @@ const DEFAULT_R2_CONFIG: CloudflareR2Credentials = {
   isConfigured: false,
 };
 
-export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddProject }) => {
+export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddProject, onProjectsUpdated }) => {
   const [config, setConfig] = useState<CloudflareR2Credentials>(() => {
     try {
       const stored = localStorage.getItem('vsl_cloudflare_r2_credentials');
@@ -47,6 +48,36 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
   const [formConfig, setFormConfig] = useState<CloudflareR2Credentials>(config);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [isSyncingBucket, setIsSyncingBucket] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const handleSyncBucketVideos = async () => {
+    setIsSyncingBucket(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch('/api/r2/sync-videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formConfig,
+          folderPath: vslFolderPath || 'vsl-haus',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSyncMessage(`✅ ${data.message}`);
+        if (data.projects && onProjectsUpdated) {
+          onProjectsUpdated(data.projects);
+        }
+      } else {
+        setSyncMessage(`❌ ${data.error || 'Falha ao sincronizar os vídeos do R2.'}`);
+      }
+    } catch (err: any) {
+      setSyncMessage(`❌ Erro de conexão ao sincronizar com o Cloudflare R2.`);
+    } finally {
+      setIsSyncingBucket(false);
+    }
+  };
 
   // Upload e Conectores de Vídeo e Foto no R2 Bucket
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -609,6 +640,36 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
 
         {/* UPLOADER DIRETO R2 & VSL CREATOR */}
         <div className="lg:col-span-7 space-y-6">
+          {/* BANNER DE SINCRONIZAÇÃO AUTOMÁTICA DE VÍDEOS DO R2 */}
+          <div className="p-5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <RefreshCw className={`w-4 h-4 text-indigo-400 ${isSyncingBucket ? 'animate-spin' : ''}`} />
+                  <span>Sincronizar Vídeos do Cloudflare R2</span>
+                </h4>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Importa automaticamente todos os vídeos (<code className="text-indigo-300">.mp4</code>, <code className="text-indigo-300">.mov</code>, <code className="text-indigo-300">.webm</code>) já existentes no seu bucket do Cloudflare R2.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSyncBucketVideos}
+                disabled={isSyncingBucket}
+                className="shrink-0 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingBucket ? 'animate-spin' : ''}`} />
+                <span>{isSyncingBucket ? 'Escaneando R2...' : 'Sincronizar Bucket Agora'}</span>
+              </button>
+            </div>
+
+            {syncMessage && (
+              <div className="p-3 rounded-xl bg-black/40 border border-neutral-800 text-xs text-neutral-200">
+                {syncMessage}
+              </div>
+            )}
+          </div>
+
           <div className="p-6 rounded-2xl bg-neutral-900 border border-neutral-800 shadow-sm space-y-6">
             <div className="pb-3 border-b border-neutral-800 flex items-center justify-between">
               <div className="flex items-center gap-2 text-white font-bold text-sm">

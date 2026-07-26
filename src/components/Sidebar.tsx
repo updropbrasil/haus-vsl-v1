@@ -43,15 +43,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'landing_customizer' as ActiveTab,
-      label: 'Landing Page Builder',
+      label: 'Landing Page & Pitch Builder',
       icon: Layout,
-      badge: 'PAGE',
-    },
-    {
-      id: 'player_builder' as ActiveTab,
-      label: 'Configurações de Pitch',
-      icon: Sliders,
-      badge: undefined,
+      badge: 'BUILDER',
     },
     {
       id: 'analytics' as ActiveTab,

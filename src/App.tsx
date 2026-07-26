@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { VslPlayer } from './components/VslPlayer';
@@ -47,6 +47,82 @@ import {
   Trash2,
   Layout,
 } from 'lucide-react';
+
+// Subcomponente para Pré-visualização do Vídeo Rodando Silencioso no Card
+const CardVideoPreview: React.FC<{
+  videoUrl?: string;
+  secondaryVideoUrl?: string;
+  thumbnailUrl?: string;
+  title: string;
+}> = ({ videoUrl, secondaryVideoUrl, thumbnailUrl, title }) => {
+  const [currentSrc, setCurrentSrc] = useState(videoUrl);
+  const [hasError, setHasError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    setCurrentSrc(videoUrl);
+    setHasError(false);
+  }, [videoUrl]);
+
+  useEffect(() => {
+    if (videoRef.current && currentSrc && !hasError) {
+      videoRef.current.play().catch(() => {
+        // Ignora erro de autoplay restrito pelo navegador
+      });
+    }
+  }, [currentSrc, hasError]);
+
+  const handleVideoError = () => {
+    if (currentSrc === videoUrl && secondaryVideoUrl && secondaryVideoUrl !== videoUrl) {
+      console.warn('⚠️ Preview principal do card falhou. Alternando para URL secundária:', secondaryVideoUrl);
+      setCurrentSrc(secondaryVideoUrl);
+    } else {
+      setHasError(true);
+    }
+  };
+
+  if (thumbnailUrl) {
+    return (
+      <img
+        src={thumbnailUrl}
+        alt={title}
+        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+
+  if (currentSrc && !hasError) {
+    return (
+      <div className="w-full h-full relative bg-black">
+        <video
+          ref={videoRef}
+          src={currentSrc}
+          muted
+          loop
+          playsInline
+          autoPlay
+          preload="auto"
+          onError={handleVideoError}
+          onLoadedData={() => {
+            videoRef.current?.play().catch(() => {});
+          }}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 pointer-events-none"
+        />
+        <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-black/70 backdrop-blur-md text-[9px] font-extrabold text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 z-10 shadow-sm pointer-events-none">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>RODANDO SILENCIOSO</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full flex items-center justify-center bg-neutral-950 text-neutral-600">
+      <Video className="w-12 h-12" />
+    </div>
+  );
+};
 
 function getRouteInfo(allProjects: VslProject[]): { isVslRoute: boolean; matchedProjectId?: string } {
   if (typeof window === 'undefined') {
@@ -110,11 +186,24 @@ function getRouteInfo(allProjects: VslProject[]): { isVslRoute: boolean; matched
 }
 
 export default function App() {
+  const [isHydrated, setIsHydrated] = useState(false);
   const [projects, setProjects] = useState<VslProject[]>(() => {
     try {
       const stored = localStorage.getItem('vsl_projects_db');
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Filtra mockups se houverem outros projetos
+          const nonMock = parsed.filter((p: any) => {
+            const url = p.videoUrl || '';
+            return !url.includes('gtv-videos-bucket') &&
+                   !url.includes('commondatastorage.googleapis.com') &&
+                   !url.includes('BigBuckBunny') &&
+                   p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+          });
+          if (nonMock.length > 0) return nonMock;
+          return parsed;
+        }
       }
     } catch {
       // Fallback
@@ -146,6 +235,7 @@ export default function App() {
   });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [deletingProject, setDeletingProject] = useState<VslProject | null>(null);
   const [currentUser, setCurrentUser] = useState<UserSession | null>(() => getLocalUserSession());
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -167,47 +257,150 @@ export default function App() {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  // Sync to localStorage
+  // Sync to localStorage and Server Persistence
   useEffect(() => {
+    if (!isHydrated) return; // Evita sobrescrever os projetos no servidor antes da hidratação
     try {
       localStorage.setItem('vsl_projects_db', JSON.stringify(projects));
+      if (projects.length > 0) {
+        fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projects }),
+        }).catch(() => {});
+      }
     } catch {
       // Fallback
     }
-  }, [projects]);
+  }, [projects, isHydrated]);
 
-  // Busca VSLs reais e Credenciais (R2 + Supabase) salvas na inicialização e ao logar
+  // Busca VSLs reais do servidor, R2 e Supabase na inicialização e ao logar
   useEffect(() => {
     async function hydrateAllCredentialsAndData() {
-      // 1. Hidrata credenciais do Supabase
-      await hydrateSupabaseCredentials();
-
-      // 2. Busca VSLs reais do Supabase DB se disponível
-      const realProjects = await fetchProjectsFromSupabase();
-      if (realProjects && realProjects.length > 0) {
-        setProjects(realProjects);
-        const routeInfo = getRouteInfo(realProjects);
-        if (routeInfo.matchedProjectId) {
-          setSelectedProjectId(routeInfo.matchedProjectId);
-        } else if (!window.location.pathname.startsWith('/vsl')) {
-          setSelectedProjectId(realProjects[0].id);
-        }
-      }
-
-      // 3. Hidrata credenciais do Cloudflare R2
+      // 1. Obtém credenciais salvas do Cloudflare R2
+      let r2Creds: any = null;
       try {
-        let r2Creds = await fetchR2ConfigFromSupabase();
-        if (!r2Creds) {
+        const stored = localStorage.getItem('vsl_cloudflare_r2_credentials');
+        if (stored) r2Creds = JSON.parse(stored);
+      } catch {}
+
+      if (!r2Creds?.accountId || !r2Creds?.accessKeyId) {
+        try {
           const res = await fetch('/api/settings/r2');
           if (res.ok) {
             const data = await res.json();
             if (data?.config) r2Creds = data.config;
           }
-        }
-        if (r2Creds && (r2Creds.accessKeyId || r2Creds.accountId)) {
-          localStorage.setItem('vsl_cloudflare_r2_credentials', JSON.stringify(r2Creds));
+        } catch {}
+      }
+
+      // 2. Tenta sincronizar automaticamente os vídeos do Cloudflare R2 enviando credenciais
+      let syncedProjects: VslProject[] | null = null;
+      try {
+        const syncRes = await fetch('/api/r2/sync-videos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...(r2Creds || {}),
+            folderPath: r2Creds?.folderPath || 'vsl-haus',
+          }),
+        });
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          if (syncData?.projects && Array.isArray(syncData.projects) && syncData.projects.length > 0) {
+            syncedProjects = syncData.projects;
+          }
         }
       } catch {}
+
+      // 3. Se não obteve do R2, busca projetos salvos no servidor Node.js
+      if (!syncedProjects || syncedProjects.length === 0) {
+        try {
+          const res = await fetch('/api/projects');
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+              syncedProjects = data.projects;
+            }
+          }
+        } catch {}
+      }
+
+      // 4. Aplica os projetos sincronizados e limpa os mockups se existirem vídeos reais
+      if (syncedProjects && syncedProjects.length > 0) {
+        const realNonMock = syncedProjects.filter((p: any) => {
+          const url = p.videoUrl || '';
+          return !url.includes('gtv-videos-bucket') &&
+                 !url.includes('commondatastorage.googleapis.com') &&
+                 !url.includes('BigBuckBunny') &&
+                 p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+        });
+
+        const finalProjects = realNonMock.length > 0 ? realNonMock : syncedProjects;
+        setProjects(finalProjects);
+
+        const routeInfo = getRouteInfo(finalProjects);
+        if (routeInfo.matchedProjectId) {
+          setSelectedProjectId(routeInfo.matchedProjectId);
+        } else if (finalProjects.length > 0) {
+          setSelectedProjectId(finalProjects[0].id);
+        }
+      }
+
+      // 5. Hidrata credenciais do Supabase e sincroniza projetos bidirecionalmente
+      await hydrateSupabaseCredentials();
+
+      try {
+        const dbProjects = await fetchProjectsFromSupabase();
+        setProjects((currentProjects) => {
+          if (dbProjects && dbProjects.length > 0) {
+            const validActiveIds = new Set(currentProjects.map((p) => p.id));
+            const seenVideoFiles = new Set<string>();
+
+            // Remove do Supabase registros duplicados ou fantasmas que não existem nos vídeos ativos do R2
+            dbProjects.forEach((dbP) => {
+              const rawFileName = dbP.videoUrl ? dbP.videoUrl.split('?')[0].split('/').pop() : dbP.id;
+              const key = rawFileName || dbP.id;
+
+              if (seenVideoFiles.has(key) && !validActiveIds.has(dbP.id)) {
+                // Duplicata no Supabase -> exclui para limpar o banco
+                deleteProjectFromSupabase(dbP.id);
+              } else {
+                seenVideoFiles.add(key);
+              }
+            });
+
+            const updatedList = currentProjects.map((p) => {
+              const matchedDb = dbProjects.find((dbP) => dbP.id === p.id);
+              if (matchedDb) {
+                return {
+                  ...p,
+                  pitchConfig: matchedDb.pitchConfig || p.pitchConfig,
+                  landingPageConfig: matchedDb.landingPageConfig || p.landingPageConfig,
+                  totalViews: Math.max(p.totalViews || 0, matchedDb.totalViews || 0),
+                  plays: Math.max(p.plays || 0, matchedDb.plays || 0),
+                };
+              } else {
+                // Projeto ativo ainda não existe no Supabase -> Salva automaticamente
+                syncProjectToSupabase(p);
+              }
+              return p;
+            });
+
+            return updatedList;
+          } else {
+            // Se o Supabase ainda está vazio, envia todos os vídeos ativos
+            currentProjects.forEach((p) => {
+              syncProjectToSupabase(p);
+            });
+            return currentProjects;
+          }
+        });
+      } catch (err) {
+        console.warn('Aviso na sincronização do Supabase:', err);
+      }
+
+      setIsHydrated(true);
     }
 
     hydrateAllCredentialsAndData();
@@ -368,17 +561,49 @@ export default function App() {
     );
   };
 
-  // Handler: Delete VSL Project
-  const handleDeleteProject = (id: string) => {
-    if (projects.length <= 1) {
-      alert('Você precisa ter pelo menos um projeto VSL cadastrado.');
-      return;
+  // Handler: Confirm Delete VSL Project (Exclui do R2, Supabase e Servidor)
+  const confirmDeleteProject = async (id: string) => {
+    const targetProject = projects.find((p) => p.id === id);
+    if (!targetProject) return;
+
+    const remaining = projects.filter((p) => p.id !== id);
+    setProjects(remaining);
+    if (remaining.length > 0) {
+      setSelectedProjectId((prev) => (prev === id ? remaining[0].id : prev));
+    } else {
+      setSelectedProjectId('');
     }
-    if (confirm('Tem certeza que deseja excluir este VSL?')) {
-      const remaining = projects.filter((p) => p.id !== id);
-      setProjects(remaining);
-      setSelectedProjectId(remaining[0].id);
-      deleteProjectFromSupabase(id);
+
+    try {
+      localStorage.setItem('vsl_projects_db', JSON.stringify(remaining));
+    } catch {}
+
+    // 1. Exclui do Supabase
+    deleteProjectFromSupabase(id);
+
+    // 2. Exclui do Servidor Node.js
+    fetch(`/api/projects/${id}`, { method: 'DELETE' }).catch(() => {});
+
+    // 3. Exclui o arquivo do bucket Cloudflare R2
+    try {
+      await fetch('/api/r2/delete-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: id,
+          fileKey: targetProject.fileKey,
+          videoUrl: targetProject.videoUrl,
+        }),
+      });
+    } catch (err) {
+      console.warn('Aviso ao excluir vídeo do R2:', err);
+    }
+  };
+
+  const handleDeleteProject = (id: string) => {
+    const target = projects.find((p) => p.id === id);
+    if (target) {
+      setDeletingProject(target);
     }
   };
 
@@ -500,10 +725,11 @@ export default function App() {
                     <span>Limpar Mockups</span>
                   </button>
 
-                  {projects.length > 1 && (
+                  {selectedProject && (
                     <button
                       onClick={() => handleDeleteProject(selectedProject.id)}
                       className="px-3 py-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+                      title="Excluir este vídeo do Cloudflare R2, Supabase e do Servidor"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                       <span>Excluir Este VSL</span>
@@ -645,18 +871,12 @@ export default function App() {
                     >
                       <div>
                         <div className="aspect-video w-full rounded-lg bg-neutral-950 overflow-hidden relative mb-4 border border-neutral-800 group">
-                          {proj.thumbnailUrl ? (
-                            <img
-                              src={proj.thumbnailUrl}
-                              alt={proj.title}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center bg-neutral-950 text-neutral-600">
-                              <Video className="w-12 h-12" />
-                            </div>
-                          )}
+                          <CardVideoPreview
+                            videoUrl={proj.videoUrl}
+                            secondaryVideoUrl={proj.secondaryVideoUrl}
+                            thumbnailUrl={proj.thumbnailUrl}
+                            title={proj.title}
+                          />
                           <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-transparent opacity-80" />
                           <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-bold text-white">
                             <span className="px-2 py-0.5 rounded bg-neutral-900/90 backdrop-blur-md">
@@ -711,8 +931,12 @@ export default function App() {
                         </button>
 
                         <button
-                          onClick={() => handleDeleteProject(proj.id)}
-                          className="p-2 rounded-lg text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleDeleteProject(proj.id);
+                          }}
+                          className="p-2 rounded-lg text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                           title="Excluir VSL"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -725,12 +949,13 @@ export default function App() {
             </div>
           )}
 
-          {/* ABA 3: LANDING PAGE BUILDER & CUSTOMIZER */}
-          {activeTab === 'landing_customizer' && (
+          {/* ABA 3: LANDING PAGE & PITCH BUILDER COMPLETO */}
+          {(activeTab === 'landing_customizer' || activeTab === 'player_builder') && (
             <div className="space-y-6 animate-fade-in">
               <LandingPageCustomizer
                 project={selectedProject}
                 onSaveConfig={handleSaveLandingPageConfig}
+                onSavePitchConfig={handleSavePitchConfig}
                 onPreviewLandingPage={() => {
                   const slug = selectedProject?.landingPageConfig?.slug || selectedProject?.id || '';
                   window.history.pushState({}, '', `/vsl/${slug}`);
@@ -745,16 +970,6 @@ export default function App() {
             <div className="space-y-6 animate-fade-in">
               <RetentionChart project={selectedProject} />
               <AnalyticsOverview project={selectedProject} />
-            </div>
-          )}
-
-          {/* ABA 5: CONFIGURAÇÃO DE PITCH */}
-          {activeTab === 'player_builder' && (
-            <div className="space-y-6 animate-fade-in">
-              <PitchConfigurator
-                project={selectedProject}
-                onSavePitchConfig={handleSavePitchConfig}
-              />
             </div>
           )}
 
@@ -775,7 +990,10 @@ export default function App() {
           {/* ABA 8: CLOUDFLARE R2 & S3 STORAGE BUCKET */}
           {activeTab === 'cloudflare_r2' && (
             <div className="space-y-6 animate-fade-in">
-              <CloudflareR2Config onAddProject={handleAddProject} />
+              <CloudflareR2Config
+                onAddProject={handleAddProject}
+                onProjectsUpdated={(updatedProjects) => setProjects(updatedProjects)}
+              />
             </div>
           )}
         </main>
@@ -787,6 +1005,46 @@ export default function App() {
         onClose={() => setIsModalOpen(false)}
         onAddProject={handleAddProject}
       />
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE VSL */}
+      {deletingProject && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-rose-400 font-bold text-lg pb-3 border-b border-neutral-800">
+              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
+                <Trash2 className="w-6 h-6 text-rose-400" />
+              </div>
+              <h3>Excluir Vídeo VSL?</h3>
+            </div>
+            <p className="text-xs text-neutral-300 leading-relaxed">
+              Tem certeza que deseja excluir o VSL <strong className="text-white">"{deletingProject.title}"</strong>?
+            </p>
+            <p className="text-[11px] text-neutral-400">
+              Esta ação removerá permanentemente o vídeo do Cloudflare R2, do banco de dados Supabase e de todas as landing pages.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingProject(null)}
+                className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const idToDelete = deletingProject.id;
+                  setDeletingProject(null);
+                  confirmDeleteProject(idToDelete);
+                }}
+                className="px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg cursor-pointer transition-colors"
+              >
+                Sim, Excluir VSL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL DE AUTENTICAÇÃO SAAS OBRIGATÓRIA */}
       <AuthModal

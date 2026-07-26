@@ -21,12 +21,15 @@ import {
   Check,
   Code,
   Share2,
+  Clock,
+  Flame,
 } from 'lucide-react';
-import { VslProject, LandingPageConfig } from '../types';
+import { VslProject, LandingPageConfig, PitchConfig } from '../types';
 
 interface LandingPageCustomizerProps {
   project: VslProject;
   onSaveConfig: (newConfig: LandingPageConfig) => void;
+  onSavePitchConfig?: (newPitchConfig: PitchConfig) => void;
   onPreviewLandingPage: () => void;
 }
 
@@ -65,12 +68,13 @@ const PRESET_REAL_ESTATE_BADGES = [
 export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
   project,
   onSaveConfig,
+  onSavePitchConfig,
   onPreviewLandingPage,
 }) => {
   const defaultConfig: LandingPageConfig = {
     slug: project.title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     headline: 'OPORTUNIDADE IMOBILIÁRIA: Assista à Apresentação Exclusiva do Imóvel Abaixo',
-    subheadline: 'Descubra a localização优先级, fotos exclusivas e condições facilitadas de aquisição.',
+    subheadline: 'Descubra a localização exclusiva, fotos e condições facilitadas de aquisição.',
     bgImageUrl: PRESET_BACKGROUNDS[0].url,
     bgOverlayOpacity: 0.88,
     primaryColor: '#4f46e5',
@@ -85,6 +89,16 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
       'Atendimento Exclusivo Corretor',
       'Escritura & Documentação 100% Ok',
     ],
+  };
+
+  const currentPitch: PitchConfig = project.pitchConfig || {
+    pitchTimeSeconds: 90,
+    ctaText: 'QUERO GARANTIR MINHA VAGA COM DESCONTO',
+    ctaSubtext: '⚡ Desconto exclusivo liberado pelo tempo do vídeo',
+    ctaUrl: 'https://checkout.exemplo.com/vsl-oferta',
+    ctaButtonColor: '#059669',
+    pulseEffect: true,
+    showCountdown: true,
   };
 
   const initial = project.landingPageConfig || defaultConfig;
@@ -110,6 +124,17 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
           'Escritura & Documentação 100% Ok',
         ]
   );
+
+  // Pitch Config State
+  const [pitchMinutes, setPitchMinutes] = useState(Math.floor(currentPitch.pitchTimeSeconds / 60));
+  const [pitchSeconds, setPitchSeconds] = useState(currentPitch.pitchTimeSeconds % 60);
+  const [ctaText, setCtaText] = useState(currentPitch.ctaText);
+  const [ctaSubtext, setCtaSubtext] = useState(currentPitch.ctaSubtext || '');
+  const [ctaUrl, setCtaUrl] = useState(currentPitch.ctaUrl);
+  const [ctaButtonColor, setCtaButtonColor] = useState(currentPitch.ctaButtonColor || '#059669');
+  const [pulseEffect, setPulseEffect] = useState(currentPitch.pulseEffect);
+  const [showCountdown, setShowCountdown] = useState(currentPitch.showCountdown);
+
   const [customDomain, setCustomDomain] = useState('https://vsl.hauscrm.com.br');
   const [copiedLinkType, setCopiedLinkType] = useState<string | null>(null);
   const [newBadgeText, setNewBadgeText] = useState('');
@@ -130,7 +155,11 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
     if (project.landingPageConfig) {
       setSlug(project.landingPageConfig.slug);
       setHeadline(project.landingPageConfig.headline);
+      setHeadlineColor(project.landingPageConfig.headlineColor || '#ffffff');
       setSubheadline(project.landingPageConfig.subheadline || '');
+      setSubheadlineColor(project.landingPageConfig.subheadlineColor || '#cbd5e1');
+      setPrimaryColor(project.landingPageConfig.primaryColor || '#4f46e5');
+      setHeaderBgColor(project.landingPageConfig.headerBgColor || '#09090b');
       setBgImageUrl(project.landingPageConfig.bgImageUrl || '');
       setBgOverlayOpacity(project.landingPageConfig.bgOverlayOpacity ?? 0.85);
       setFooterText(project.landingPageConfig.footerText || '');
@@ -138,6 +167,16 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
       if (project.landingPageConfig.customBadges) {
         setCustomBadges(project.landingPageConfig.customBadges);
       }
+    }
+    if (project.pitchConfig) {
+      setPitchMinutes(Math.floor(project.pitchConfig.pitchTimeSeconds / 60));
+      setPitchSeconds(project.pitchConfig.pitchTimeSeconds % 60);
+      setCtaText(project.pitchConfig.ctaText);
+      setCtaSubtext(project.pitchConfig.ctaSubtext || '');
+      setCtaUrl(project.pitchConfig.ctaUrl);
+      setCtaButtonColor(project.pitchConfig.ctaButtonColor || '#059669');
+      setPulseEffect(project.pitchConfig.pulseEffect);
+      setShowCountdown(project.pitchConfig.showCountdown);
     }
   }, [project]);
 
@@ -178,6 +217,20 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
       customBadges,
     };
     onSaveConfig(updated);
+
+    if (onSavePitchConfig) {
+      const totalSeconds = pitchMinutes * 60 + pitchSeconds;
+      onSavePitchConfig({
+        pitchTimeSeconds: totalSeconds,
+        ctaText,
+        ctaSubtext,
+        ctaUrl,
+        ctaButtonColor,
+        pulseEffect,
+        showCountdown,
+      });
+    }
+
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -362,6 +415,124 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
                 className="w-full bg-neutral-950 border border-neutral-800 focus:border-indigo-500 rounded-lg px-3.5 py-2.5 text-white text-xs focus:outline-none"
                 placeholder="Ex: Descubra o método comprovado para acelerar suas vendas."
               />
+            </div>
+          </div>
+
+          {/* CONFIGURAÇÃO DO PITCH DE VENDAS & BOTÃO CTA */}
+          <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800 shadow-sm space-y-5">
+            <div className="pb-3 border-b border-neutral-800 flex items-center justify-between text-sm font-bold text-white">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-amber-400" />
+                <span>Configuração do Pitch de Vendas & Botão CTA</span>
+              </div>
+              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[10px] font-bold border border-amber-500/20">
+                DESBLOQUEIO AUTOMÁTICO
+              </span>
+            </div>
+
+            {/* Tempo do Pitch */}
+            <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+              <label className="block text-neutral-200 font-bold flex items-center gap-1.5 text-xs">
+                <Clock className="w-4 h-4 text-amber-400" />
+                Tempo de Desbloqueio do Pitch ({pitchMinutes.toString().padStart(2, '0')}:{pitchSeconds.toString().padStart(2, '0')})
+              </label>
+              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                O botão de compra/oferta abaixo do vídeo será exibido automaticamente quando o usuário assistir a {pitchMinutes * 60 + pitchSeconds} segundos.
+              </p>
+
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <span className="text-[10px] text-neutral-400 font-semibold block mb-1">Minutos</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={pitchMinutes}
+                    onChange={(e) => setPitchMinutes(parseInt(e.target.value) || 0)}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-white font-mono font-bold text-sm text-center focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <span className="text-xl font-bold text-neutral-600 mt-4">:</span>
+                <div className="flex-1">
+                  <span className="text-[10px] text-neutral-400 font-semibold block mb-1">Segundos</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={pitchSeconds}
+                    onChange={(e) => setPitchSeconds(parseInt(e.target.value) || 0)}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-white font-mono font-bold text-sm text-center focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Texto do CTA */}
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-neutral-200 font-bold mb-1">Texto Principal do Botão CTA</label>
+                <input
+                  type="text"
+                  value={ctaText}
+                  onChange={(e) => setCtaText(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3.5 py-2.5 text-white font-bold text-xs focus:border-indigo-500 focus:outline-none"
+                  placeholder="QUERO GARANTIR MINHA VAGA COM DESCONTO"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-200 font-bold mb-1">Subtexto do Botão (Urgência / Garantia)</label>
+                <input
+                  type="text"
+                  value={ctaSubtext}
+                  onChange={(e) => setCtaSubtext(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3.5 py-2.5 text-white text-xs focus:border-indigo-500 focus:outline-none"
+                  placeholder="⚡ Desconto exclusivo liberado pelo tempo do vídeo"
+                />
+              </div>
+
+              <div>
+                <label className="block text-neutral-200 font-bold mb-1">URL de Destino / Link de Checkout</label>
+                <input
+                  type="url"
+                  value={ctaUrl}
+                  onChange={(e) => setCtaUrl(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3.5 py-2.5 text-indigo-400 font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                  placeholder="https://checkout.exemplo.com/vsl-oferta"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                <div>
+                  <label className="block text-neutral-200 font-bold mb-1">Cor do Botão CTA</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={ctaButtonColor}
+                      onChange={(e) => setCtaButtonColor(e.target.value)}
+                      className="w-9 h-9 rounded-lg bg-neutral-950 border border-neutral-800 cursor-pointer p-0.5"
+                    />
+                    <input
+                      type="text"
+                      value={ctaButtonColor}
+                      onChange={(e) => setCtaButtonColor(e.target.value)}
+                      className="flex-1 bg-neutral-950 border border-neutral-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none uppercase"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-end gap-2 pb-1">
+                  <label className="flex items-center gap-2 text-neutral-300 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={pulseEffect}
+                      onChange={(e) => setPulseEffect(e.target.checked)}
+                      className="rounded bg-neutral-950 border-neutral-800 text-indigo-600 focus:ring-0"
+                    />
+                    <span>Efeito de Pulsar no Botão</span>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -748,16 +919,25 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
               <span className="text-xs font-bold text-neutral-300 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                Prévia ao Vivo
+                Prévia ao Vivo em Tempo Real
               </span>
-              <span className="text-[10px] text-neutral-500 font-mono">100% Responsivo</span>
+              <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Ao Vivo
+              </span>
             </div>
 
             {/* MOCKUP CONTAINER DE PÁGINA */}
             <div
-              className="relative rounded-lg overflow-hidden border border-neutral-800 bg-neutral-950 min-h-[420px] flex flex-col justify-between p-4 text-center bg-cover bg-center transition-all"
+              className="relative rounded-xl overflow-hidden border border-neutral-800 bg-neutral-950 min-h-[440px] flex flex-col justify-between p-4 text-center bg-cover bg-center transition-all shadow-xl"
               style={{ backgroundImage: bgImageUrl ? `url(${bgImageUrl})` : 'none' }}
             >
+              {/* Top Header Bar Accent */}
+              <div
+                className="absolute top-0 left-0 right-0 h-1 z-20 transition-colors"
+                style={{ backgroundColor: headerBgColor || primaryColor }}
+              />
+
               {/* Overlay dark */}
               <div
                 className="absolute inset-0 bg-neutral-950 transition-opacity"
@@ -765,24 +945,107 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
               />
 
               <div className="relative z-10 space-y-2 pt-2">
-                <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[9px] font-bold uppercase tracking-wider">
-                  Exclusivo
+                <span
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider border transition-colors"
+                  style={{
+                    backgroundColor: `${primaryColor}25`,
+                    borderColor: `${primaryColor}50`,
+                    color: primaryColor,
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full animate-ping" style={{ backgroundColor: primaryColor }} />
+                  Apresentação Exclusiva
                 </span>
-                <h4 className="text-xs font-black text-white leading-tight line-clamp-2">
+
+                <h4
+                  className="text-xs sm:text-sm font-black leading-tight line-clamp-2 transition-colors drop-shadow"
+                  style={{ color: headlineColor || '#ffffff' }}
+                >
                   {headline || 'Headline da VSL'}
                 </h4>
+
                 {subheadline && (
-                  <p className="text-[10px] text-neutral-300 line-clamp-2">{subheadline}</p>
+                  <p
+                    className="text-[10px] font-medium line-clamp-2 transition-colors drop-shadow-sm"
+                    style={{ color: subheadlineColor || '#cbd5e1' }}
+                  >
+                    {subheadline}
+                  </p>
                 )}
               </div>
 
-              {/* Player Mock */}
-              <div className="relative z-10 my-4 aspect-video rounded-md bg-neutral-900/90 border border-neutral-800 flex flex-col items-center justify-center p-3 text-neutral-400">
-                <div className="w-10 h-10 rounded-full bg-indigo-600/90 flex items-center justify-center text-white mb-1 shadow-lg">
-                  ▶
+              {/* Player com Vídeo Ativo Rodando Silencioso em Tempo Real */}
+              <div className="relative z-10 my-3 aspect-video rounded-lg bg-black border border-neutral-800 overflow-hidden shadow-2xl group flex items-center justify-center">
+                {project.videoUrl ? (
+                  <video
+                    src={project.videoUrl}
+                    muted
+                    loop
+                    playsInline
+                    autoPlay
+                    preload="auto"
+                    onError={(e) => {
+                      if (project.secondaryVideoUrl && e.currentTarget.src !== project.secondaryVideoUrl) {
+                        e.currentTarget.src = project.secondaryVideoUrl;
+                      }
+                    }}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-neutral-400 p-4">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-white mb-1 shadow-lg"
+                      style={{ backgroundColor: primaryColor }}
+                    >
+                      ▶
+                    </div>
+                    <span className="text-[10px] font-mono text-neutral-300">Player VSL</span>
+                  </div>
+                )}
+
+                <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70 backdrop-blur-md text-[8px] font-bold text-emerald-400 border border-emerald-500/30 flex items-center gap-1 pointer-events-none">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>VÍDEO EM TEMPO REAL</span>
                 </div>
-                <span className="text-[10px] font-mono text-neutral-300">Player VSL Integrado</span>
               </div>
+
+              {/* PRÉVIA DO BOTÃO CTA DO PITCH DESBLOQUEADO */}
+              <div className="relative z-10 my-2 space-y-1">
+                <div
+                  style={{ backgroundColor: ctaButtonColor || primaryColor }}
+                  className={`w-full py-2.5 px-3 rounded-lg text-white font-extrabold text-xs shadow-lg flex flex-col items-center justify-center gap-0.5 uppercase tracking-wide cursor-pointer transition-all ${
+                    pulseEffect ? 'animate-pulse' : ''
+                  }`}
+                >
+                  <span>{ctaText || 'QUERO GARANTIR MINHA VAGA'}</span>
+                  {ctaSubtext && (
+                    <span className="text-[9px] font-normal normal-case opacity-90 leading-tight">
+                      {ctaSubtext}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[8px] text-amber-400 font-mono block">
+                  ⚡ Desbloqueia automaticamente aos {pitchMinutes.toString().padStart(2, '0')}:
+                  {pitchSeconds.toString().padStart(2, '0')} do vídeo
+                </span>
+              </div>
+
+              {/* Selos em miniatura */}
+              {showSecurityBadges && customBadges.length > 0 && (
+                <div className="relative z-10 flex flex-wrap items-center justify-center gap-1 my-1">
+                  {customBadges.slice(0, 3).map((badge) => (
+                    <span
+                      key={badge}
+                      className="px-2 py-0.5 rounded bg-neutral-900/90 border border-neutral-800 text-[8px] text-neutral-300 truncate max-w-[120px]"
+                    >
+                      ✓ {badge}
+                    </span>
+                  ))}
+                  {customBadges.length > 3 && (
+                    <span className="text-[8px] text-neutral-500">+{customBadges.length - 3}</span>
+                  )}
+                </div>
+              )}
 
               {/* Footer Mock */}
               <div className="relative z-10 text-[9px] text-neutral-500 border-t border-neutral-800/80 pt-2">

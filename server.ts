@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import { createServer as createViteServer } from 'vite';
@@ -83,6 +83,412 @@ async function startServer() {
       savedServerSupabaseConfig = JSON.parse(fs.readFileSync(supabaseConfigPath, 'utf8'));
     }
   } catch (e) {}
+
+  // Memória e Persistência de Projetos VSL no Servidor Node.js
+  let savedServerProjects: any[] = [];
+  const projectsPath = path.join(process.cwd(), '.vsl-projects.json');
+
+  try {
+    if (fs.existsSync(projectsPath)) {
+      savedServerProjects = JSON.parse(fs.readFileSync(projectsPath, 'utf8'));
+    }
+  } catch (e) {}
+
+  function persistProjectsToServer(projects: any[]) {
+    try {
+      savedServerProjects = projects;
+      fs.writeFileSync(projectsPath, JSON.stringify(projects, null, 2), 'utf8');
+    } catch (e) {}
+  }
+
+  // API Route: Buscar Todos os Projetos do Servidor (Sincronização entre Navegadores/Sessões)
+  app.get('/api/projects', (req, res) => {
+    return res.json({
+      success: true,
+      projects: savedServerProjects,
+    });
+  });
+
+  // API Route: Salvar/Atualizar Projetos no Servidor
+  app.post('/api/projects', (req, res) => {
+    try {
+      const { projects, project } = req.body;
+      if (Array.isArray(projects)) {
+        persistProjectsToServer(projects);
+        return res.json({ success: true, projects: savedServerProjects });
+      } else if (project && project.id) {
+        const index = savedServerProjects.findIndex((p: any) => p.id === project.id);
+        if (index >= 0) {
+          savedServerProjects[index] = { ...savedServerProjects[index], ...project };
+        } else {
+          savedServerProjects.unshift(project);
+        }
+        persistProjectsToServer(savedServerProjects);
+        return res.json({ success: true, projects: savedServerProjects });
+      }
+      return res.status(400).json({ success: false, error: 'Dados de projeto inválidos.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API Route: Excluir Projeto no Servidor
+  app.delete('/api/projects/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      savedServerProjects = savedServerProjects.filter((p: any) => p.id !== id);
+      persistProjectsToServer(savedServerProjects);
+      return res.json({ success: true, projects: savedServerProjects });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API Route: Escanear o Bucket Cloudflare R2 e Sincronizar Todos os Vídeos Existentes
+  app.all('/api/r2/sync-videos', async (req, res) => {
+    try {
+      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string || savedServerR2Config?.accountId || '');
+      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string || savedServerR2Config?.accessKeyId || '')?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string || savedServerR2Config?.secretAccessKey || '')?.trim();
+      const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
+        req.body?.bucketName || req.query?.bucketName as string || savedServerR2Config?.bucketName || '',
+        req.body?.folderPath || req.query?.folderPath as string || savedServerR2Config?.folderPath || ''
+      );
+      // Pasta alvo prioritária vsl-haus
+      const rawFolder = req.body?.folderPath || req.body?.vslFolderPath || req.query?.folderPath || savedServerR2Config?.folderPath || 'vsl-haus';
+      const targetFolder = rawFolder.toString().trim().replace(/^\/+|\/+$/g, '');
+
+      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string || savedServerR2Config?.publicDomain || 'https://pub-vsl-optima.r2.dev')).trim().replace(/\/+$/, '');
+
+      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+        return res.status(400).json({
+          success: false,
+          error: 'Credenciais do Cloudflare R2 não foram fornecidas ou configuradas no servidor.'
+        });
+      }
+
+      if (!publicDomain.startsWith('http://') && !publicDomain.startsWith('https://')) {
+        publicDomain = `https://${publicDomain}`;
+      }
+
+      // Salva e atualiza credenciais no servidor se enviadas na requisição
+      if (accountId && accessKeyId && secretAccessKey && bucketName) {
+        savedServerR2Config = {
+          accountId,
+          accessKeyId,
+          secretAccessKey,
+          bucketName,
+          folderPath: targetFolder,
+          publicDomain,
+          isConfigured: true,
+        };
+        try {
+          fs.writeFileSync(configPath, JSON.stringify(savedServerR2Config, null, 2), 'utf8');
+        } catch (e) {}
+      }
+
+      const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
+      const s3Client = new S3Client({
+        region: 'auto',
+        endpoint,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+      });
+
+      console.log(`[R2 SYNC ROUTE] Escaneando pasta "${targetFolder}" no bucket "${bucketName}" no Cloudflare R2...`);
+
+      // Busca objetos com o prefixo da pasta vsl-haus
+      const listParams: any = { Bucket: bucketName, MaxKeys: 1000 };
+      if (targetFolder) {
+        listParams.Prefix = `${targetFolder}/`;
+      }
+
+      let listRes = await s3Client.send(new ListObjectsV2Command(listParams));
+      let contents = listRes.Contents || [];
+
+      // Caso o prefix com barra não traga resultados, faz a busca geral no bucket e filtra pela pasta
+      if (contents.length === 0 && targetFolder) {
+        const fallbackCmd = new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1000 });
+        const fallbackRes = await s3Client.send(fallbackCmd);
+        contents = (fallbackRes.Contents || []).filter((item) =>
+          item.Key && item.Key.toLowerCase().includes(targetFolder.toLowerCase())
+        );
+      }
+
+      const videoExtensions = ['.mp4', '.mov', '.webm', '.m4v', '.avi', '.mkv'];
+
+      const videoObjects = contents.filter((item) => {
+        if (!item.Key) return false;
+        const lower = item.Key.toLowerCase();
+        const isVideo = videoExtensions.some((ext) => lower.endsWith(ext));
+        if (!isVideo) return false;
+        if (targetFolder) {
+          const targetLower = targetFolder.toLowerCase();
+          return lower.startsWith(targetLower + '/') || lower.includes(targetLower);
+        }
+        return true;
+      });
+
+      console.log(`[R2 SYNC ROUTE] Encontrados ${videoObjects.length} vídeos na pasta "${targetFolder}".`);
+
+      const activeKeys = new Set(videoObjects.map((obj) => obj.Key).filter(Boolean));
+      const cleanProjectsMap = new Map<string, any>();
+      let newAddedCount = 0;
+
+      for (const obj of videoObjects) {
+        if (!obj.Key) continue;
+        const key = obj.Key;
+        const rawFileName = key.split('/').pop() || key;
+        const publicUrl = `${publicDomain}/${key}`;
+        const streamUrl = `/api/r2/stream?key=${encodeURIComponent(key)}`;
+
+        let presignedUrl = publicUrl;
+        try {
+          const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
+          presignedUrl = await getSignedUrl(s3Client, getCmd, { expiresIn: 604800 }); // 7 dias
+        } catch (e) {
+          console.warn('[R2 PRESIGNED URL FAIL]', e);
+        }
+
+        // Procura se já existe algum projeto em savedServerProjects que aponta para este mesmo arquivo R2
+        const existingProject = savedServerProjects.find((p: any) => {
+          if (!p || !p.videoUrl) return false;
+          if (p.fileKey === key) return true;
+          const urlClean = p.videoUrl.split('?')[0];
+          if (urlClean.endsWith(`/${key}`) || urlClean.includes(encodeURIComponent(key)) || urlClean.includes(rawFileName)) return true;
+          if (p.secondaryVideoUrl && p.secondaryVideoUrl.includes(encodeURIComponent(key))) return true;
+          return false;
+        });
+
+        if (existingProject) {
+          // Atualiza as URLs do projeto existente e garante a referência à fileKey
+          const updatedProj = {
+            ...existingProject,
+            fileKey: key,
+            videoUrl: presignedUrl,
+            secondaryVideoUrl: streamUrl,
+          };
+          cleanProjectsMap.set(key, updatedProj);
+        } else {
+          // Cria um único novo projeto para este vídeo R2
+          let formattedTitle = rawFileName
+            .replace(/\.[^/.]+$/, '') // remove extensão
+            .replace(/^\d+-/, '')     // remove timestamp inicial
+            .replace(/[-_]+/g, ' ')   // substitui hífens por espaço
+            .trim();
+
+          if (!formattedTitle || formattedTitle.length < 2) {
+            formattedTitle = `Vídeo R2 (${rawFileName})`;
+          } else {
+            formattedTitle = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1);
+          }
+
+          const newProject = {
+            id: `vsl-r2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            title: formattedTitle,
+            description: `Vídeo importado automaticamente do Cloudflare R2 (${rawFileName})`,
+            fileKey: key,
+            videoUrl: presignedUrl,
+            secondaryVideoUrl: streamUrl,
+            aspectRatio: '16:9',
+            durationSeconds: 180,
+            createdAt: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date().toISOString(),
+            totalViews: 0,
+            plays: 0,
+            completionCount: 0,
+            avgWatchTimeSeconds: 0,
+            pitchConfig: {
+              pitchTimeSeconds: 60,
+              ctaText: 'COMPRAR COM DESCONTO EXCLUSIVO',
+              ctaUrl: 'https://seuempreendimento.com.br/checkout',
+              ctaButtonColor: '#059669',
+              pulseEffect: true,
+              showCountdown: true,
+            },
+            retentionData: [],
+            events: [],
+          };
+          cleanProjectsMap.set(key, newProject);
+          newAddedCount++;
+        }
+      }
+
+      // Mantém apenas projetos customizados não-mockups
+      const nonR2Projects = savedServerProjects.filter((p: any) => {
+        const url = p.videoUrl || '';
+        const isMock = url.includes('gtv-videos-bucket') ||
+                       url.includes('commondatastorage.googleapis.com') ||
+                       url.includes('BigBuckBunny') ||
+                       p.id === 'vsl-001' || p.id === 'vsl-002' || p.id === 'vsl-003';
+        if (isMock) return false;
+        if (p.fileKey && !activeKeys.has(p.fileKey)) return false;
+        if (p.id?.startsWith('vsl-r2-')) return false; // Já processados pelo cleanProjectsMap
+        return true;
+      });
+
+      const baseProjects = [...Array.from(cleanProjectsMap.values()), ...nonR2Projects];
+
+      persistProjectsToServer(baseProjects);
+
+      return res.json({
+        success: true,
+        message: `Sincronização concluída! ${videoObjects.length} vídeo(s) únicos no R2 (${newAddedCount} novo(s) importado(s)).`,
+        totalInR2: videoObjects.length,
+        newAdded: newAddedCount,
+        projects: baseProjects,
+      });
+    } catch (err: any) {
+      console.error('[R2 SYNC ROUTE] Erro ao sincronizar bucket R2:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Falha ao sincronizar os vídeos do Cloudflare R2.',
+      });
+    }
+  });
+
+  // API Route para Excluir um Vídeo do Cloudflare R2 e Remover do Servidor
+  app.all('/api/r2/delete-video', async (req, res) => {
+    try {
+      const rawKey = (req.body?.fileKey || req.query?.fileKey || req.body?.key || req.query?.key || '').toString().trim();
+      const videoUrl = (req.body?.videoUrl || req.query?.videoUrl || '').toString().trim();
+      const projectId = (req.body?.projectId || req.query?.projectId || req.body?.id || req.query?.id || '').toString().trim();
+
+      let keyToDelete = rawKey;
+      if (!keyToDelete && videoUrl) {
+        try {
+          const urlObj = new URL(videoUrl);
+          let pathname = decodeURIComponent(urlObj.pathname).replace(/^\/+/, '');
+          if (savedServerR2Config?.bucketName && pathname.startsWith(savedServerR2Config.bucketName + '/')) {
+            pathname = pathname.substring(savedServerR2Config.bucketName.length + 1);
+          }
+          keyToDelete = pathname;
+        } catch (e) {
+          const match = videoUrl.match(/(vsl-haus\/[^\?\#]+)/) || videoUrl.match(/([0-9]+-[^\?\#]+)/);
+          if (match) keyToDelete = match[1];
+        }
+      }
+
+      console.log(`[R2 DELETE ROUTE] Solicitação de exclusão do arquivo: "${keyToDelete}" (Projeto ID: ${projectId})`);
+
+      const accountId = cleanAccountId(req.body?.accountId || savedServerR2Config?.accountId || '');
+      const accessKeyId = (req.body?.accessKeyId || savedServerR2Config?.accessKeyId || '')?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || savedServerR2Config?.secretAccessKey || '')?.trim();
+      const bucketName = (req.body?.bucketName || savedServerR2Config?.bucketName || '')?.trim();
+
+      let r2Deleted = false;
+      if (accountId && accessKeyId && secretAccessKey && bucketName && keyToDelete) {
+        try {
+          const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
+          const s3Client = new S3Client({
+            region: 'auto',
+            endpoint,
+            credentials: { accessKeyId, secretAccessKey },
+          });
+
+          await s3Client.send(new DeleteObjectCommand({
+            Bucket: bucketName,
+            Key: keyToDelete,
+          }));
+          r2Deleted = true;
+          console.log(`[R2 DELETE ROUTE] Arquivo "${keyToDelete}" excluído com sucesso do bucket "${bucketName}" no R2!`);
+        } catch (errR2: any) {
+          console.warn('[R2 DELETE ROUTE] Aviso ao tentar excluir objeto no R2:', errR2?.message || errR2);
+        }
+      }
+
+      // Remove do projeto do servidor
+      if (projectId || keyToDelete) {
+        savedServerProjects = savedServerProjects.filter((p: any) => {
+          if (projectId && p.id === projectId) return false;
+          if (keyToDelete) {
+            if (p.fileKey === keyToDelete) return false;
+            if (p.videoUrl && p.videoUrl.includes(keyToDelete)) return false;
+          }
+          return true;
+        });
+        persistProjectsToServer(savedServerProjects);
+      }
+
+      return res.json({
+        success: true,
+        message: 'Vídeo e projeto excluídos do Cloudflare R2 e do servidor!',
+        r2Deleted,
+        projects: savedServerProjects,
+      });
+    } catch (err: any) {
+      console.error('[R2 DELETE ROUTE] Erro ao excluir vídeo:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Falha ao excluir vídeo.' });
+    }
+  });
+
+  // API Route para Streaming Direto de Vídeos do Cloudflare R2 (Suporte a Range Requests HTTP 206)
+  app.get('/api/r2/stream', async (req, res) => {
+    try {
+      const rawKey = (req.query.key as string || '').trim();
+      if (!rawKey) return res.status(400).send('Key do arquivo é obrigatória.');
+
+      const accountId = cleanAccountId((req.query.accountId as string) || savedServerR2Config?.accountId || '');
+      const accessKeyId = ((req.query.accessKeyId as string) || savedServerR2Config?.accessKeyId || '')?.trim();
+      const secretAccessKey = ((req.query.secretAccessKey as string) || savedServerR2Config?.secretAccessKey || '')?.trim();
+      const bucketName = ((req.query.bucketName as string) || savedServerR2Config?.bucketName || '')?.trim();
+
+      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+        return res.status(400).send('Credenciais do Cloudflare R2 não configuradas no servidor.');
+      }
+
+      const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
+      const s3Client = new S3Client({
+        region: 'auto',
+        endpoint,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+      });
+
+      const rangeHeader = req.headers.range;
+      const getObjectParams: any = {
+        Bucket: bucketName,
+        Key: rawKey,
+      };
+
+      if (rangeHeader) {
+        getObjectParams.Range = rangeHeader;
+      }
+
+      const command = new GetObjectCommand(getObjectParams);
+      const r2Response = await s3Client.send(command);
+
+      const ext = rawKey.split('.').pop()?.toLowerCase();
+      let contentType = 'video/mp4';
+      if (ext === 'webm') contentType = 'video/webm';
+      else if (ext === 'mov') contentType = 'video/quicktime';
+      else if (ext === 'm4v') contentType = 'video/x-m4v';
+
+      res.setHeader('Content-Type', r2Response.ContentType || contentType);
+      res.setHeader('Accept-Ranges', 'bytes');
+
+      if (r2Response.ContentRange) {
+        res.setHeader('Content-Range', r2Response.ContentRange);
+        res.status(206);
+      } else if (r2Response.ContentLength) {
+        res.setHeader('Content-Length', r2Response.ContentLength);
+        res.status(200);
+      }
+
+      if (r2Response.Body) {
+        // @ts-ignore
+        r2Response.Body.pipe(res);
+      } else {
+        res.end();
+      }
+    } catch (err: any) {
+      console.error('[R2 STREAM ERROR]', err);
+      res.status(500).send(err?.message || 'Erro no streaming do vídeo.');
+    }
+  });
 
   // API Route para Consultar Credenciais do R2 Salvas no Servidor
   app.get('/api/settings/r2', (req, res) => {
@@ -271,14 +677,18 @@ async function startServer() {
         targetContentType = 'image/jpeg';
       }
 
-      const command = new PutObjectCommand({
-        Bucket: bucketName,
-        Key: fileKey,
-        Body: file.buffer,
-        ContentType: targetContentType,
+      // Upload usando @aws-sdk/lib-storage para lidar com arquivos grandes de forma otimizada
+      const parallelUploads3 = new Upload({
+        client: s3Client,
+        params: {
+          Bucket: bucketName,
+          Key: fileKey,
+          Body: file.buffer,
+          ContentType: targetContentType,
+        },
       });
 
-      await s3Client.send(command);
+      await parallelUploads3.done();
 
       const publicUrl = `${publicDomain}/${fileKey}`;
       console.log(`[R2 UPLOAD ROUTE] Upload concluído via server proxy! URL pública: ${publicUrl}`);

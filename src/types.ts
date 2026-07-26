@@ -34,6 +34,7 @@ export interface CloudflareR2Credentials {
   accessKeyId: string;
   secretAccessKey: string;
   bucketName: string;
+  folderPath?: string;
   publicDomain: string; // e.g., https://pub-xxx.r2.dev ou https://media.meuimovel.com.br
   isConfigured: boolean;
 }
@@ -61,6 +62,8 @@ export interface VslProject {
   title: string;
   description: string;
   videoUrl: string;
+  fileKey?: string;
+  secondaryVideoUrl?: string;
   aspectRatio?: '16:9' | '9:16' | '1:1' | '4:5';
   thumbnailUrl?: string;
   durationSeconds: number;
