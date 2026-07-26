@@ -17,6 +17,10 @@ import {
   Building2,
   BadgeCheck,
   Upload,
+  Copy,
+  Check,
+  Code,
+  Share2,
 } from 'lucide-react';
 import { VslProject, LandingPageConfig } from '../types';
 
@@ -106,8 +110,21 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
           'Escritura & Documentação 100% Ok',
         ]
   );
+  const [customDomain, setCustomDomain] = useState('https://vsl.hauscrm.com.br');
+  const [copiedLinkType, setCopiedLinkType] = useState<string | null>(null);
   const [newBadgeText, setNewBadgeText] = useState('');
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  const cleanDomain = customDomain.replace(/\/$/, '') || 'https://vsl.hauscrm.com.br';
+  const fullVslUrl = `${cleanDomain}/vsl/${slug || project.id}`;
+  const iframeEmbedCode = `<iframe src="${fullVslUrl}" width="100%" height="650" frameborder="0" allowfullscreen></iframe>`;
+  const jsEmbedCode = `<div id="vsl-player-${project.id}"></div>\n<script src="${cleanDomain}/embed.js" data-vsl-id="${project.id}" data-domain="${cleanDomain}"></script>`;
+
+  const copyToClipboard = (text: string, type: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedLinkType(type);
+    setTimeout(() => setCopiedLinkType(null), 2500);
+  };
 
   useEffect(() => {
     if (project.landingPageConfig) {
@@ -198,33 +215,118 @@ export const LandingPageCustomizer: React.FC<LandingPageCustomizerProps> = ({
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* COLUNA ESQUERDA: CAMPOS DE CONFIGURAÇÃO (COL 7) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* SLUG & DOMÍNIO */}
-          <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800 shadow-sm space-y-4">
-            <div className="pb-3 border-b border-neutral-800 flex items-center gap-2 text-sm font-bold text-white">
-              <Globe className="w-4 h-4 text-indigo-400" />
-              <span>Link & URL Personalizada da VSL</span>
+          {/* SLUG, DOMÍNIO & LINKS DE COMPARTILHAMENTO PRONTOS */}
+          <div className="p-6 rounded-xl bg-neutral-900 border border-neutral-800 shadow-sm space-y-5">
+            <div className="pb-3 border-b border-neutral-800 flex items-center justify-between text-sm font-bold text-white">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-emerald-400" />
+                <span>Link Oficial & Opções de Embed (https://vsl.hauscrm.com.br)</span>
+              </div>
+              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">
+                DOMÍNIO PRÓPRIO ATIVO
+              </span>
             </div>
 
-            <div>
-              <label className="block text-xs text-neutral-300 font-semibold mb-1">
-                Slug da URL (Caminho Único)
-              </label>
-              <div className="flex items-center rounded-lg bg-neutral-950 border border-neutral-800 focus-within:border-indigo-500 overflow-hidden text-xs">
-                <span className="px-3 text-neutral-500 font-mono select-none border-r border-neutral-800 bg-neutral-900 py-2.5">
-                  https://seudominio.com/vsl/
-                </span>
+            {/* Configuração de Domínio e Slug */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <div className="sm:col-span-5">
+                <label className="block text-xs text-neutral-300 font-semibold mb-1">
+                  Domínio / URL Base
+                </label>
                 <input
                   type="text"
-                  required
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  className="flex-1 bg-transparent px-3 py-2.5 text-white font-mono font-semibold focus:outline-none"
-                  placeholder="oferta-suplemento-vsl"
+                  value={customDomain}
+                  onChange={(e) => setCustomDomain(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-800 focus:border-indigo-500 rounded-lg px-3 py-2 text-white font-mono text-xs focus:outline-none"
+                  placeholder="https://vsl.hauscrm.com.br"
                 />
               </div>
-              <p className="text-[10px] text-neutral-500 mt-1">
-                Esta URL é a rota que você pode apontar no Coolify, Cloudflare ou domínio próprio.
-              </p>
+
+              <div className="sm:col-span-7">
+                <label className="block text-xs text-neutral-300 font-semibold mb-1">
+                  Slug / Rota da VSL
+                </label>
+                <div className="flex items-center rounded-lg bg-neutral-950 border border-neutral-800 focus-within:border-indigo-500 overflow-hidden text-xs">
+                  <span className="px-2.5 text-neutral-500 font-mono select-none border-r border-neutral-800 bg-neutral-900 py-2">
+                    /vsl/
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                    className="flex-1 bg-transparent px-3 py-2 text-white font-mono font-semibold focus:outline-none"
+                    placeholder="oferta-suplemento-vsl"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* BOX COM URL FINAL PRONTA PARA COPIAR */}
+            <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-neutral-400 font-bold flex items-center gap-1.5">
+                  <Share2 className="w-3.5 h-3.5 text-indigo-400" /> URL Final da Landing Page:
+                </span>
+                <span className="text-[10px] text-emerald-400 font-mono font-semibold">
+                  Pronto para uso
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-neutral-900 border border-neutral-800 font-mono text-xs text-indigo-300 select-all break-all flex items-center justify-between gap-2">
+                <span>{fullVslUrl}</span>
+                <a
+                  href={fullVslUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1 text-neutral-400 hover:text-white transition-colors"
+                  title="Abrir URL em Nova Aba"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              {/* BOTÕES DE CÓPIA RÁPIDA DE LINK E EMBED */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(fullVslUrl, 'url')}
+                  className={`px-3 py-2 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    copiedLinkType === 'url'
+                      ? 'bg-emerald-600 text-white border border-emerald-500'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/50'
+                  }`}
+                >
+                  {copiedLinkType === 'url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedLinkType === 'url' ? 'URL Copiada!' : 'Copiar Link'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(iframeEmbedCode, 'iframe')}
+                  className={`px-3 py-2 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    copiedLinkType === 'iframe'
+                      ? 'bg-emerald-600 text-white border border-emerald-500'
+                      : 'bg-neutral-800 hover:bg-neutral-700 text-white border border-neutral-700'
+                  }`}
+                >
+                  {copiedLinkType === 'iframe' ? <Check className="w-3.5 h-3.5" /> : <Code className="w-3.5 h-3.5" />}
+                  <span>{copiedLinkType === 'iframe' ? 'iFrame Copiado!' : 'Copiar iFrame'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(jsEmbedCode, 'script')}
+                  className={`px-3 py-2 rounded-lg font-semibold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    copiedLinkType === 'script'
+                      ? 'bg-emerald-600 text-white border border-emerald-500'
+                      : 'bg-neutral-800 hover:bg-neutral-700 text-white border border-neutral-700'
+                  }`}
+                >
+                  {copiedLinkType === 'script' ? <Check className="w-3.5 h-3.5" /> : <Code className="w-3.5 h-3.5" />}
+                  <span>{copiedLinkType === 'script' ? 'Script Copiado!' : 'Copiar Script'}</span>
+                </button>
+              </div>
             </div>
           </div>
 

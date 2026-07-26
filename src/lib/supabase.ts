@@ -19,8 +19,38 @@ export function getSupabaseCredentials(): { url: string; key: string } {
 }
 
 export function saveSupabaseCredentials(url: string, key: string): void {
-  localStorage.setItem(STORAGE_URL_KEY, url.trim());
-  localStorage.setItem(STORAGE_KEY_KEY, key.trim());
+  const cleanUrl = url.trim();
+  const cleanKey = key.trim();
+  localStorage.setItem(STORAGE_URL_KEY, cleanUrl);
+  localStorage.setItem(STORAGE_KEY_KEY, cleanKey);
+
+  // Salva no servidor para persistência automática
+  if (cleanUrl && cleanKey) {
+    fetch('/api/settings/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: cleanUrl, key: cleanKey }),
+    }).catch(() => {});
+  }
+}
+
+export async function hydrateSupabaseCredentials(): Promise<{ url: string; key: string }> {
+  let { url, key } = getSupabaseCredentials();
+  if (!url || !key) {
+    try {
+      const res = await fetch('/api/settings/supabase');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.config?.url && data?.config?.key) {
+          url = data.config.url;
+          key = data.config.key;
+          localStorage.setItem(STORAGE_URL_KEY, url);
+          localStorage.setItem(STORAGE_KEY_KEY, key);
+        }
+      }
+    } catch {}
+  }
+  return { url, key };
 }
 
 let cachedClient: SupabaseClient | null = null;
@@ -246,12 +276,69 @@ export async function sendEventToSupabase(event: VslEvent): Promise<boolean> {
 }
 
 /**
+ * Salva as credenciais do Cloudflare R2 no banco de dados Supabase
+ */
+export async function saveR2ConfigToSupabase(r2Config: any): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase.from('vsl_settings').upsert(
+      {
+        id: 'default',
+        r2_config: r2Config,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (error) {
+      console.warn('Aviso: Não foi possível gravar R2 Config no Supabase (verifique se a tabela vsl_settings existe):', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Falha ao conectar com Supabase para salvar R2:', err);
+    return false;
+  }
+}
+
+/**
+ * Busca as credenciais salvas do Cloudflare R2 diretamente do Supabase
+ */
+export async function fetchR2ConfigFromSupabase(): Promise<any | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from('vsl_settings')
+      .select('r2_config')
+      .eq('id', 'default')
+      .maybeSingle();
+
+    if (error && error.code !== 'PGRST116') {
+      console.warn('Aviso ao buscar R2 Config no Supabase:', error.message);
+      return null;
+    }
+
+    if (data?.r2_config && typeof data.r2_config === 'object' && Object.keys(data.r2_config).length > 0) {
+      return data.r2_config;
+    }
+    return null;
+  } catch (err) {
+    console.warn('Falha ao consultar R2 Config no Supabase:', err);
+    return null;
+  }
+}
+
+/**
  * Retorna o script SQL completo para ser executado no Supabase SQL Editor
  */
 export function generateSupabaseSqlScript(): string {
   return `-- ============================================================
 -- SCRIPT SQL COMPLETO PARA MULTI-TENANT SAAS (VSL OPTIMA ANALYTICS)
--- Execute no SQL Editor do seu Supabase para habilitar contas e isolamento de dados
+-- Execute no SQL Editor do seu Supabase para habilitar contas, tabelas e R2
 -- ============================================================
 
 -- 1. Criação da Tabela de Projetos VSL (vsl_projects)
@@ -285,16 +372,24 @@ CREATE TABLE IF NOT EXISTS public.vsl_events (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Índices de Desempenho
+-- 3. Tabela de Configurações do App e Credenciais Cloudflare R2 (vsl_settings)
+CREATE TABLE IF NOT EXISTS public.vsl_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  r2_config JSONB DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Índices de Desempenho
 CREATE INDEX IF NOT EXISTS idx_vsl_projects_user_id ON public.vsl_projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_vsl_events_vsl_id ON public.vsl_events(vsl_id);
 CREATE INDEX IF NOT EXISTS idx_vsl_events_type ON public.vsl_events(event_type);
 
--- 4. Habilitar RLS (Row Level Security) para Multi-Tenancy SaaS
+-- 5. Habilitar RLS (Row Level Security)
 ALTER TABLE public.vsl_projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vsl_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vsl_settings ENABLE ROW LEVEL SECURITY;
 
--- Políticas de RLS: O usuário só enxerga/modifica seus próprios VSLs no dashboard
+-- Políticas de RLS
 DROP POLICY IF EXISTS "Acesso publico para leitura de VSL e landing page" ON public.vsl_projects;
 CREATE POLICY "Acesso publico para leitura de VSL e landing page"
   ON public.vsl_projects FOR SELECT USING (true);
@@ -307,7 +402,11 @@ DROP POLICY IF EXISTS "Permitir insercao publica de eventos do player" ON public
 CREATE POLICY "Permitir insercao publica de eventos do player"
   ON public.vsl_events FOR ALL USING (true) WITH CHECK (true);
 
--- 5. View de Resumo do Dashboard Multi-tenant
+DROP POLICY IF EXISTS "Permitir gerenciar configuracoes vsl_settings" ON public.vsl_settings;
+CREATE POLICY "Permitir gerenciar configuracoes vsl_settings"
+  ON public.vsl_settings FOR ALL USING (true) WITH CHECK (true);
+
+-- 6. View de Resumo do Dashboard Multi-tenant
 CREATE OR REPLACE VIEW public.vsl_analytics_summary AS
 SELECT
   p.id AS vsl_id,

@@ -5,6 +5,7 @@ import {
   saveSupabaseCredentials,
   testSupabaseConnection,
   generateSupabaseSqlScript,
+  hydrateSupabaseCredentials,
 } from '../lib/supabase';
 
 export const SupabaseConfig: React.FC = () => {
@@ -16,12 +17,15 @@ export const SupabaseConfig: React.FC = () => {
   const sqlScript = generateSupabaseSqlScript();
 
   useEffect(() => {
-    const creds = getSupabaseCredentials();
-    setUrl(creds.url);
-    setKey(creds.key);
-    if (creds.url && creds.key) {
-      handleTestConnection(creds.url, creds.key);
+    async function loadSupabaseConfig() {
+      const { url: hydUrl, key: hydKey } = await hydrateSupabaseCredentials();
+      if (hydUrl) setUrl(hydUrl);
+      if (hydKey) setKey(hydKey);
+      if (hydUrl && hydKey) {
+        handleTestConnection(hydUrl, hydKey);
+      }
     }
+    loadSupabaseConfig();
   }, []);
 
   const handleSave = (e: React.FormEvent) => {

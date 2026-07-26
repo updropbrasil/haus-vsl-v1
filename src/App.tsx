@@ -20,6 +20,8 @@ import {
   deleteProjectFromSupabase,
   getLocalUserSession,
   saveLocalUserSession,
+  fetchR2ConfigFromSupabase,
+  hydrateSupabaseCredentials,
 } from './lib/supabase';
 import { INITIAL_VSL_PROJECTS } from './mockData';
 import {
@@ -93,17 +95,37 @@ export default function App() {
     }
   }, [projects]);
 
-  // Busca VSLs reais do Supabase na inicialização, se disponível
+  // Busca VSLs reais e Credenciais (R2 + Supabase) salvas na inicialização e ao logar
   useEffect(() => {
-    async function loadFromSupabase() {
+    async function hydrateAllCredentialsAndData() {
+      // 1. Hidrata credenciais do Supabase
+      await hydrateSupabaseCredentials();
+
+      // 2. Busca VSLs reais do Supabase DB se disponível
       const realProjects = await fetchProjectsFromSupabase();
       if (realProjects && realProjects.length > 0) {
         setProjects(realProjects);
         setSelectedProjectId(realProjects[0].id);
       }
+
+      // 3. Hidrata credenciais do Cloudflare R2
+      try {
+        let r2Creds = await fetchR2ConfigFromSupabase();
+        if (!r2Creds) {
+          const res = await fetch('/api/settings/r2');
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.config) r2Creds = data.config;
+          }
+        }
+        if (r2Creds && (r2Creds.accessKeyId || r2Creds.accountId)) {
+          localStorage.setItem('vsl_cloudflare_r2_credentials', JSON.stringify(r2Creds));
+        }
+      } catch {}
     }
-    loadFromSupabase();
-  }, []);
+
+    hydrateAllCredentialsAndData();
+  }, [currentUser]);
 
   // Handler: Limpar Dados de Exemplo (Mockup)
   const handleClearMockData = () => {
@@ -638,14 +660,16 @@ export default function App() {
         onAddProject={handleAddProject}
       />
 
-      {/* MODAL DE AUTENTICAÇÃO SAAS */}
+      {/* MODAL DE AUTENTICAÇÃO SAAS OBRIGATÓRIA */}
       <AuthModal
         currentUser={currentUser}
-        isOpen={isAuthModalOpen}
+        isOpen={isAuthModalOpen || (!currentUser && activeTab !== 'public_landing')}
+        isMandatory={!currentUser && activeTab !== 'public_landing'}
         onClose={() => setIsAuthModalOpen(false)}
         onLoginSuccess={(session) => {
           setCurrentUser(session);
           saveLocalUserSession(session);
+          setIsAuthModalOpen(false);
         }}
         onLogout={() => {
           setCurrentUser(null);

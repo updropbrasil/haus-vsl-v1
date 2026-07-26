@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import multer from 'multer';
 import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -62,6 +63,75 @@ async function startServer() {
       return res.status(200).end();
     }
     next();
+  });
+
+  // Memória e Persistência de Configurações no Servidor Node.js
+  let savedServerR2Config: any = null;
+  const configPath = path.join(process.cwd(), '.r2-config.json');
+
+  try {
+    if (fs.existsSync(configPath)) {
+      savedServerR2Config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    }
+  } catch (e) {}
+
+  let savedServerSupabaseConfig: any = null;
+  const supabaseConfigPath = path.join(process.cwd(), '.supabase-config.json');
+
+  try {
+    if (fs.existsSync(supabaseConfigPath)) {
+      savedServerSupabaseConfig = JSON.parse(fs.readFileSync(supabaseConfigPath, 'utf8'));
+    }
+  } catch (e) {}
+
+  // API Route para Consultar Credenciais do R2 Salvas no Servidor
+  app.get('/api/settings/r2', (req, res) => {
+    return res.json({
+      success: true,
+      config: savedServerR2Config || null,
+    });
+  });
+
+  // API Route para Salvar Credenciais do R2 no Servidor
+  app.post('/api/settings/r2', (req, res) => {
+    try {
+      const config = req.body;
+      if (config && typeof config === 'object') {
+        savedServerR2Config = config;
+        try {
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+        } catch (e) {}
+        return res.json({ success: true, message: 'Credenciais salvas no servidor com sucesso!' });
+      }
+      return res.status(400).json({ success: false, error: 'Configuração inválida.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // API Route para Consultar Credenciais do Supabase no Servidor
+  app.get('/api/settings/supabase', (req, res) => {
+    return res.json({
+      success: true,
+      config: savedServerSupabaseConfig || null,
+    });
+  });
+
+  // API Route para Salvar Credenciais do Supabase no Servidor
+  app.post('/api/settings/supabase', (req, res) => {
+    try {
+      const config = req.body;
+      if (config && typeof config === 'object') {
+        savedServerSupabaseConfig = config;
+        try {
+          fs.writeFileSync(supabaseConfigPath, JSON.stringify(config, null, 2), 'utf8');
+        } catch (e) {}
+        return res.json({ success: true, message: 'Credenciais do Supabase salvas no servidor!' });
+      }
+      return res.status(400).json({ success: false, error: 'Configuração inválida.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // API Route para Gerar Presigned URL para Upload Direto

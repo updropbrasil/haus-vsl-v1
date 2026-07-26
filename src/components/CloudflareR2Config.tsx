@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { CloudflareR2Credentials, VslProject } from '../types';
 import { sanitizeR2Credentials, uploadFileToR2, testR2CredentialsServer } from '../lib/r2';
+import { fetchR2ConfigFromSupabase, saveR2ConfigToSupabase } from '../lib/supabase';
 
 interface CloudflareR2ConfigProps {
   onAddProject?: (newProj: VslProject) => void;
@@ -74,6 +75,55 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
   const [vslDescription, setVslDescription] = useState('');
   const [vslCreatedSuccess, setVslCreatedSuccess] = useState(false);
 
+  // Auto-hidratação das credenciais salvas no Supabase ou no Servidor Node.js
+  useEffect(() => {
+    async function hydrateR2Credentials() {
+      // 1. Tenta carregar do Supabase DB
+      const supabaseR2 = await fetchR2ConfigFromSupabase();
+      if (supabaseR2 && (supabaseR2.accessKeyId || supabaseR2.accountId)) {
+        const merged: CloudflareR2Credentials = {
+          accountId: supabaseR2.accountId || formConfig.accountId,
+          accessKeyId: supabaseR2.accessKeyId || formConfig.accessKeyId,
+          secretAccessKey: supabaseR2.secretAccessKey || formConfig.secretAccessKey,
+          bucketName: supabaseR2.bucketName || formConfig.bucketName || 'jasondias-videos',
+          publicDomain: supabaseR2.publicDomain || formConfig.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev',
+          isConfigured: true,
+        };
+        setConfig(merged);
+        setFormConfig(merged);
+        try {
+          localStorage.setItem('vsl_cloudflare_r2_credentials', JSON.stringify(merged));
+        } catch {}
+        return;
+      }
+
+      // 2. Tenta carregar do Servidor Backend Node.js (/api/settings/r2)
+      try {
+        const res = await fetch('/api/settings/r2');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.config && (data.config.accessKeyId || data.config.accountId)) {
+            const merged: CloudflareR2Credentials = {
+              accountId: data.config.accountId || formConfig.accountId,
+              accessKeyId: data.config.accessKeyId || formConfig.accessKeyId,
+              secretAccessKey: data.config.secretAccessKey || formConfig.secretAccessKey,
+              bucketName: data.config.bucketName || formConfig.bucketName || 'jasondias-videos',
+              publicDomain: data.config.publicDomain || formConfig.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev',
+              isConfigured: true,
+            };
+            setConfig(merged);
+            setFormConfig(merged);
+            try {
+              localStorage.setItem('vsl_cloudflare_r2_credentials', JSON.stringify(merged));
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    hydrateR2Credentials();
+  }, []);
+
   const handleTestR2Credentials = async () => {
     setTestingR2(true);
     setTestStatus(null);
@@ -115,6 +165,15 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
     try {
       localStorage.setItem('vsl_cloudflare_r2_credentials', JSON.stringify(updated));
     } catch {}
+
+    // Salva no Supabase DB e no Servidor Express Node.js para nunca mais perder as credenciais
+    saveR2ConfigToSupabase(updated);
+    fetch('/api/settings/r2', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated),
+    }).catch(() => {});
+
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };

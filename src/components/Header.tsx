@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Video,
   Plus,
@@ -13,6 +13,8 @@ import {
   ExternalLink,
   Sun,
   Moon,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { VslProject, UserSession } from '../types';
 
@@ -39,6 +41,16 @@ export const Header: React.FC<HeaderProps> = ({
   theme,
   onToggleTheme,
 }) => {
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const slug = selectedProject?.landingPageConfig?.slug || selectedProject?.id || '';
+  const fullLink = `https://vsl.hauscrm.com.br/vsl/${slug}`;
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(fullLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
   return (
     <header className="w-full bg-neutral-950 border-b border-neutral-800 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 z-20">
       {/* SELETOR DE VSL ATIVO */}
@@ -82,6 +94,20 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             <Moon className="w-4 h-4 text-indigo-400" />
           )}
+        </button>
+
+        {/* Copiar Link Direto do VSL */}
+        <button
+          onClick={handleCopyLink}
+          className={`px-3 py-2 rounded-lg font-semibold text-xs border transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+            copiedLink
+              ? 'bg-emerald-600 text-white border-emerald-500'
+              : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+          }`}
+          title={`Copiar URL: ${fullLink}`}
+        >
+          {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+          <span>{copiedLink ? 'Link Copiado!' : 'Copiar Link VSL'}</span>
         </button>
 
         {/* Ver Landing Page do VSL */}

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { VslProject } from '../types';
 import { uploadFileToR2, sanitizeR2Credentials } from '../lib/r2';
+import { fetchR2ConfigFromSupabase } from '../lib/supabase';
 
 interface VslUploaderModalProps {
   isOpen: boolean;
@@ -91,38 +92,54 @@ export const VslUploaderModal: React.FC<VslUploaderModalProps> = ({
 
       setErrorMsg('');
 
-      // Verifica se o usuário tem credenciais salvas do Cloudflare R2
+      // Busca credenciais do Cloudflare R2 em LocalStorage, Supabase ou Servidor
       try {
+        let creds: any = null;
         const storedR2 = localStorage.getItem('vsl_cloudflare_r2_credentials');
         if (storedR2) {
-          const creds = JSON.parse(storedR2);
-          if (creds && (creds.accountId || creds.publicDomain)) {
-            setIsUploadingToR2(true);
-            setR2UploadProgress(5);
-            setR2StatusMsg({ success: true, message: 'Enviando arquivo para o Cloudflare R2...' });
+          try { creds = JSON.parse(storedR2); } catch {}
+        }
 
-            const res = await uploadFileToR2(
-              file,
-              creds,
-              'vsl-haus',
-              (progress) => setR2UploadProgress(progress),
-              (logMsg) => addDebugLog(logMsg)
-            );
+        if (!creds || !creds.accessKeyId) {
+          creds = await fetchR2ConfigFromSupabase();
+        }
 
-            setIsUploadingToR2(false);
-
-            if (res.success && res.publicUrl) {
-              setVideoUrl(res.publicUrl);
-              setR2StatusMsg({
-                success: true,
-                message: '✅ Vídeo enviado e hospedado no Cloudflare R2 com Sucesso!',
-              });
-            } else {
-              setR2StatusMsg({
-                success: false,
-                message: res.error || 'Não foi possível enviar ao R2. Vídeo usando pré-visualização local.',
-              });
+        if (!creds || !creds.accessKeyId) {
+          try {
+            const srvRes = await fetch('/api/settings/r2');
+            if (srvRes.ok) {
+              const srvData = await srvRes.json();
+              if (srvData?.config) creds = srvData.config;
             }
+          } catch {}
+        }
+
+        if (creds && (creds.accessKeyId || creds.accountId || creds.publicDomain)) {
+          setIsUploadingToR2(true);
+          setR2UploadProgress(5);
+          setR2StatusMsg({ success: true, message: 'Enviando arquivo para o Cloudflare R2...' });
+
+          const res = await uploadFileToR2(
+            file,
+            creds,
+            'vsl-haus',
+            (progress) => setR2UploadProgress(progress),
+            (logMsg) => addDebugLog(logMsg)
+          );
+
+          setIsUploadingToR2(false);
+
+          if (res.success && res.publicUrl) {
+            setVideoUrl(res.publicUrl);
+            setR2StatusMsg({
+              success: true,
+              message: '✅ Vídeo enviado e hospedado no Cloudflare R2 com Sucesso!',
+            });
+          } else {
+            setR2StatusMsg({
+              success: false,
+              message: res.error || 'Não foi possível enviar ao R2. Vídeo usando pré-visualização local.',
+            });
           }
         }
       } catch (err) {
@@ -176,6 +193,15 @@ export const VslUploaderModal: React.FC<VslUploaderModalProps> = ({
         ctaButtonColor: ctaButtonColor || '#059669',
         pulseEffect: true,
         showCountdown: true,
+      },
+      landingPageConfig: {
+        slug: title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        headline: `ASSISTA AO VÍDEO EXCLUSIVO: ${title.trim()}`,
+        subheadline: 'Apresentação especial com condições e informações em tempo real.',
+        bgImageUrl: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=2000&q=80',
+        bgOverlayOpacity: 0.88,
+        footerText: `© ${new Date().getFullYear()} ${title.trim()}. Todos os Direitos Reservados.`,
+        showSecurityBadges: true,
       },
       retentionData: [],
       events: [],

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Lock,
   Mail,
-  UserCheck,
   Sparkles,
   ArrowRight,
   ShieldAlert,
@@ -19,6 +18,7 @@ interface AuthModalProps {
   onLogout: () => void;
   isOpen: boolean;
   onClose: () => void;
+  isMandatory?: boolean;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -27,11 +27,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onLogout,
   isOpen,
   onClose,
+  isMandatory = false,
 }) => {
-  const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -48,59 +47,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       if (supabase) {
-        if (isRegistering) {
-          const { data, error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { name } },
-          });
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-          if (error) throw error;
+        if (error) throw error;
 
-          const userSession: UserSession = {
-            id: data.user?.id || `user_${Date.now()}`,
-            email: data.user?.email || email,
-            name: name || email.split('@')[0],
-          };
+        const userSession: UserSession = {
+          id: data.user?.id || `user_${Date.now()}`,
+          email: data.user?.email || email,
+          name: data.user?.user_metadata?.name || email.split('@')[0],
+        };
 
-          saveLocalUserSession(userSession);
-          onLoginSuccess(userSession);
-          setSuccessMsg('Conta de parceiro criada com sucesso no Supabase!');
-          setTimeout(() => onClose(), 1200);
-        } else {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-
-          if (error) throw error;
-
-          const userSession: UserSession = {
-            id: data.user?.id || `user_${Date.now()}`,
-            email: data.user?.email || email,
-            name: data.user?.user_metadata?.name || email.split('@')[0],
-          };
-
-          saveLocalUserSession(userSession);
-          onLoginSuccess(userSession);
-          setSuccessMsg('Login efetuado com sucesso!');
-          setTimeout(() => onClose(), 1000);
-        }
+        saveLocalUserSession(userSession);
+        onLoginSuccess(userSession);
+        setSuccessMsg('Login efetuado com sucesso!');
+        setTimeout(() => onClose(), 1000);
       } else {
         // Fallback para modo local / SaaS demo caso o Supabase não esteja conectado ainda
         const mockUserSession: UserSession = {
           id: `saas_user_${btoa(email).substring(0, 8)}`,
           email,
-          name: name || email.split('@')[0] || 'Parceiro SaaS',
+          name: email.split('@')[0] || 'Parceiro SaaS',
         };
 
         saveLocalUserSession(mockUserSession);
         onLoginSuccess(mockUserSession);
-        setSuccessMsg(
-          isRegistering
-            ? 'Conta de parceiro criada (Sessão Local)! Conecte o Supabase para sincronia em nuvem.'
-            : 'Login realizado com sucesso!'
-        );
+        setSuccessMsg('Login realizado com sucesso!');
         setTimeout(() => onClose(), 1200);
       }
     } catch (err: any) {
@@ -113,13 +87,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
       <div className="relative w-full max-w-md rounded-2xl bg-neutral-900 border border-neutral-800 shadow-2xl p-6 sm:p-8 space-y-6 overflow-hidden">
-        {/* Botão Fechar */}
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 text-neutral-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        {/* Botão Fechar (apenas se não for login obrigatório ou se já estiver logado) */}
+        {(!isMandatory || currentUser) && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 text-neutral-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
 
         {/* HEADER DO MODAL */}
         <div className="text-center space-y-2">
@@ -129,16 +105,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <h3 className="text-xl font-extrabold text-white tracking-tight">
             {currentUser
               ? 'Minha Conta de Parceiro SaaS'
-              : isRegistering
-              ? 'Criar Nova Conta SaaS'
               : 'Acessar Painel VSL Optima'}
           </h3>
           <p className="text-xs text-neutral-400">
             {currentUser
               ? 'Você está autenticado e seus projetos estão isolados em seu ambiente exclusivo.'
-              : isRegistering
-              ? 'Cadastre-se para criar e gerenciar seus próprios vídeos e páginas de vendas.'
-              : 'Entre com seu e-mail e senha para acessar seus projetos isolados.'}
+              : 'Entre com seu e-mail e senha para acessar o painel de controle.'}
           </p>
         </div>
 
@@ -188,25 +160,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            {isRegistering && (
-              <div>
-                <label className="block text-xs font-semibold text-neutral-300 mb-1">
-                  Nome Completo / Empresa
-                </label>
-                <div className="relative">
-                  <UserCheck className="absolute left-3 top-3 w-4 h-4 text-neutral-500" />
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2.5 rounded-lg bg-neutral-950 border border-neutral-800 text-white text-xs focus:outline-none focus:border-indigo-500"
-                    placeholder="Seu Nome ou da sua Marca"
-                  />
-                </div>
-              </div>
-            )}
-
             <div>
               <label className="block text-xs font-semibold text-neutral-300 mb-1">E-mail de Acesso</label>
               <div className="relative">
@@ -247,26 +200,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span>Autenticando...</span>
               ) : (
                 <>
-                  <span>{isRegistering ? 'Criar Conta de Parceiro' : 'Entrar no Sistema'}</span>
+                  <span>Entrar no Sistema</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
-
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsRegistering(!isRegistering);
-                  setErrorMsg('');
-                }}
-                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-semibold cursor-pointer"
-              >
-                {isRegistering
-                  ? 'Já possui uma conta? Faça login aqui'
-                  : 'Ainda não tem conta? Clique para se cadastrar'}
-              </button>
-            </div>
           </form>
         )}
       </div>
