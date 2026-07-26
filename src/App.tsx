@@ -383,6 +383,17 @@ export default function App() {
 
       setProjects(activeList);
 
+      if (activeList.length > 0) {
+        try {
+          localStorage.setItem('vsl_projects_db', JSON.stringify(activeList));
+          fetch('/api/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projects: activeList }),
+          }).catch(() => {});
+        } catch {}
+      }
+
       const routeInfo = getRouteInfo(activeList);
       if (routeInfo.matchedProjectId) {
         setSelectedProjectId(routeInfo.matchedProjectId);

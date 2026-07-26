@@ -27,21 +27,27 @@ interface CloudflareR2ConfigProps {
   onProjectsUpdated?: (projects: VslProject[]) => void;
 }
 
-const DEFAULT_R2_CONFIG: CloudflareR2Credentials = {
-  accountId: '',
-  accessKeyId: '',
-  secretAccessKey: '',
+export const DEFAULT_R2_CONFIG: CloudflareR2Credentials = {
+  accountId: '560d32a44fbbaa92d4cf9ca0bb68373d',
+  accessKeyId: '92171e9b90720446e4b4fdfc32f62ac1',
+  secretAccessKey: 'f9a116ed1aaaf09ad84114b72edd7a4b57c4c2ab1dda9e7942f820a05d6cff91',
   bucketName: 'jasondias-videos',
   publicDomain: 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev',
-  isConfigured: false,
+  isConfigured: true,
 };
 
 export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddProject, onProjectsUpdated }) => {
   const [config, setConfig] = useState<CloudflareR2Credentials>(() => {
     try {
       const stored = localStorage.getItem('vsl_cloudflare_r2_credentials');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.accessKeyId) {
+          return parsed;
+        }
+      }
     } catch {}
+    localStorage.setItem('vsl_cloudflare_r2_credentials', JSON.stringify(DEFAULT_R2_CONFIG));
     return DEFAULT_R2_CONFIG;
   });
 

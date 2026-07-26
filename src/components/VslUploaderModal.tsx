@@ -14,6 +14,7 @@ import {
 import { VslProject } from '../types';
 import { uploadFileToR2, sanitizeR2Credentials } from '../lib/r2';
 import { fetchR2ConfigFromSupabase } from '../lib/supabase';
+import { DEFAULT_R2_CONFIG } from './CloudflareR2Config';
 
 interface VslUploaderModalProps {
   isOpen: boolean;
@@ -109,9 +110,13 @@ export const VslUploaderModal: React.FC<VslUploaderModalProps> = ({
             const srvRes = await fetch('/api/settings/r2');
             if (srvRes.ok) {
               const srvData = await srvRes.json();
-              if (srvData?.config) creds = srvData.config;
+              if (srvData?.config?.accessKeyId) creds = srvData.config;
             }
           } catch {}
+        }
+
+        if (!creds || !creds.accessKeyId) {
+          creds = DEFAULT_R2_CONFIG;
         }
 
         if (creds && (creds.accessKeyId || creds.accountId || creds.publicDomain)) {

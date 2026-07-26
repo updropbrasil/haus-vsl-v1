@@ -12,9 +12,12 @@ export interface SupabaseConfigState {
   lastTestedAt?: string;
 }
 
+export const DEFAULT_SUPABASE_URL = 'https://iutydnttcmnzyeajmvuw.supabase.co';
+export const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1dHlkbnR0Y21uenllYWptdnV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4OTk1MzcsImV4cCI6MjEwMDQ3NTUzN30.GaLSZkaKbWAubn7gkQXet9YpB5W51zu-OSj-sz3R8X8';
+
 export function getSupabaseCredentials(): { url: string; key: string } {
-  const url = localStorage.getItem(STORAGE_URL_KEY) || (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  const key = localStorage.getItem(STORAGE_KEY_KEY) || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+  const url = localStorage.getItem(STORAGE_URL_KEY) || (import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const key = localStorage.getItem(STORAGE_KEY_KEY) || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   return { url, key };
 }
 

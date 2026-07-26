@@ -66,6 +66,21 @@ async function startServer() {
   });
 
   // Memória e Persistência de Configurações no Servidor Node.js
+  const DEFAULT_R2_CONFIG = {
+    accountId: '560d32a44fbbaa92d4cf9ca0bb68373d',
+    accessKeyId: '92171e9b90720446e4b4fdfc32f62ac1',
+    secretAccessKey: 'f9a116ed1aaaf09ad84114b72edd7a4b57c4c2ab1dda9e7942f820a05d6cff91',
+    bucketName: 'jasondias-videos',
+    folderPath: 'vsl-haus',
+    publicDomain: 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev',
+    isConfigured: true,
+  };
+
+  const DEFAULT_SUPABASE_CONFIG = {
+    url: 'https://iutydnttcmnzyeajmvuw.supabase.co',
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1dHlkbnR0Y21uenllYWptdnV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4OTk1MzcsImV4cCI6MjEwMDQ3NTUzN30.GaLSZkaKbWAubn7gkQXet9YpB5W51zu-OSj-sz3R8X8',
+  };
+
   let savedServerR2Config: any = null;
   const configPath = path.join(process.cwd(), '.r2-config.json');
 
@@ -74,6 +89,28 @@ async function startServer() {
       savedServerR2Config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     }
   } catch (e) {}
+
+  if (!savedServerR2Config || !savedServerR2Config.accountId || !savedServerR2Config.accessKeyId) {
+    const envAcc = process.env.R2_ACCOUNT_ID || process.env.VITE_R2_ACCOUNT_ID || DEFAULT_R2_CONFIG.accountId;
+    const envKey = process.env.R2_ACCESS_KEY_ID || process.env.VITE_R2_ACCESS_KEY_ID || DEFAULT_R2_CONFIG.accessKeyId;
+    const envSec = process.env.R2_SECRET_ACCESS_KEY || process.env.VITE_R2_SECRET_ACCESS_KEY || DEFAULT_R2_CONFIG.secretAccessKey;
+    const envBkt = process.env.R2_BUCKET_NAME || process.env.VITE_R2_BUCKET_NAME || DEFAULT_R2_CONFIG.bucketName;
+    const envFld = process.env.R2_FOLDER_PATH || process.env.VITE_R2_FOLDER_PATH || DEFAULT_R2_CONFIG.folderPath;
+    const envDom = process.env.R2_PUBLIC_DOMAIN || process.env.VITE_R2_PUBLIC_DOMAIN || DEFAULT_R2_CONFIG.publicDomain;
+
+    savedServerR2Config = {
+      accountId: envAcc,
+      accessKeyId: envKey,
+      secretAccessKey: envSec,
+      bucketName: envBkt,
+      folderPath: envFld,
+      publicDomain: envDom,
+      isConfigured: true,
+    };
+    try {
+      fs.writeFileSync(configPath, JSON.stringify(savedServerR2Config, null, 2), 'utf8');
+    } catch (e) {}
+  }
 
   let savedServerSupabaseConfig: any = null;
   const supabaseConfigPath = path.join(process.cwd(), '.supabase-config.json');
@@ -85,11 +122,12 @@ async function startServer() {
   } catch (e) {}
 
   if (!savedServerSupabaseConfig || !savedServerSupabaseConfig.url || !savedServerSupabaseConfig.key) {
-    const envUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-    const envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
-    if (envUrl && envKey) {
-      savedServerSupabaseConfig = { url: envUrl.trim(), key: envKey.trim() };
-    }
+    const envUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_CONFIG.url;
+    const envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || DEFAULT_SUPABASE_CONFIG.key;
+    savedServerSupabaseConfig = { url: envUrl.trim(), key: envKey.trim() };
+    try {
+      fs.writeFileSync(supabaseConfigPath, JSON.stringify(savedServerSupabaseConfig, null, 2), 'utf8');
+    } catch (e) {}
   }
 
   // Memória e Persistência de Projetos VSL no Servidor Node.js
