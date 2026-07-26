@@ -336,6 +336,28 @@ export default function App() {
                p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
       });
 
+      if (activeList.length === 0) {
+        try {
+          const storedLocal = localStorage.getItem('vsl_projects_db');
+          if (storedLocal) {
+            const parsed = JSON.parse(storedLocal);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              activeList = parsed.filter((p: any) => {
+                const url = p?.videoUrl || '';
+                return !url.includes('gtv-videos-bucket') &&
+                       !url.includes('commondatastorage.googleapis.com') &&
+                       !url.includes('BigBuckBunny') &&
+                       p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+              });
+            }
+          }
+        } catch {}
+      }
+
+      if (activeList.length === 0) {
+        activeList = [...INITIAL_VSL_PROJECTS];
+      }
+
       // 5. Busca VSLs cadastradas no Supabase e mescla
       try {
         const dbProjects = await fetchProjectsFromSupabase();

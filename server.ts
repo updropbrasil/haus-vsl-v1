@@ -329,8 +329,8 @@ async function startServer() {
           const updatedProj = {
             ...existingProject,
             fileKey: key,
-            videoUrl: presignedUrl,
-            secondaryVideoUrl: streamUrl,
+            videoUrl: streamUrl,
+            secondaryVideoUrl: presignedUrl,
           };
           cleanProjectsMap.set(key, updatedProj);
         } else {
@@ -352,8 +352,8 @@ async function startServer() {
             title: formattedTitle,
             description: `Vídeo importado automaticamente do Cloudflare R2 (${rawFileName})`,
             fileKey: key,
-            videoUrl: presignedUrl,
-            secondaryVideoUrl: streamUrl,
+            videoUrl: streamUrl,
+            secondaryVideoUrl: presignedUrl,
             aspectRatio: '16:9',
             durationSeconds: 180,
             createdAt: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date().toISOString(),
@@ -689,14 +689,14 @@ async function startServer() {
         return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
       }
 
-      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string);
-      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string)?.trim();
-      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string)?.trim();
+      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string || savedServerR2Config?.accountId || '');
+      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string || savedServerR2Config?.accessKeyId || '')?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string || savedServerR2Config?.secretAccessKey || '')?.trim();
       const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
-        req.body?.bucketName || req.query?.bucketName as string,
-        req.body?.folderPath || req.query?.folderPath as string
+        req.body?.bucketName || req.query?.bucketName as string || savedServerR2Config?.bucketName || '',
+        req.body?.folderPath || req.query?.folderPath as string || savedServerR2Config?.folderPath || ''
       );
-      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string) || 'https://pub-vsl-optima.r2.dev').trim().replace(/\/+$/, '');
+      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string || savedServerR2Config?.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev')).trim().replace(/\/+$/, '');
 
       if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
         return res.status(400).json({
