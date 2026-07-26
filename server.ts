@@ -178,10 +178,20 @@ async function startServer() {
         },
       });
 
+      // Garantir ContentType correto para vídeos e imagens
+      let targetContentType = contentType || 'video/mp4';
+      if (cleanFileName.endsWith('.mov') || cleanFileName.endsWith('.mp4') || cleanFileName.endsWith('.m4v') || cleanFileName.endsWith('.webm')) {
+        targetContentType = 'video/mp4';
+      } else if (cleanFileName.endsWith('.png')) {
+        targetContentType = 'image/png';
+      } else if (cleanFileName.endsWith('.jpg') || cleanFileName.endsWith('.jpeg')) {
+        targetContentType = 'image/jpeg';
+      }
+
       const command = new PutObjectCommand({
         Bucket: bucketName,
         Key: fileKey,
-        ContentType: contentType,
+        ContentType: targetContentType,
       });
 
       const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
@@ -251,11 +261,21 @@ async function startServer() {
         },
       });
 
+      // Garantir ContentType correto para vídeos e imagens no R2
+      let targetContentType = file.mimetype || 'video/mp4';
+      if (cleanFileName.endsWith('.mov') || cleanFileName.endsWith('.mp4') || cleanFileName.endsWith('.m4v') || cleanFileName.endsWith('.webm')) {
+        targetContentType = 'video/mp4';
+      } else if (cleanFileName.endsWith('.png')) {
+        targetContentType = 'image/png';
+      } else if (cleanFileName.endsWith('.jpg') || cleanFileName.endsWith('.jpeg')) {
+        targetContentType = 'image/jpeg';
+      }
+
       const command = new PutObjectCommand({
         Bucket: bucketName,
         Key: fileKey,
         Body: file.buffer,
-        ContentType: file.mimetype || 'video/mp4',
+        ContentType: targetContentType,
       });
 
       await s3Client.send(command);

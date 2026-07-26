@@ -364,6 +364,11 @@ async function uploadViaPresignedUrl(
 ): Promise<{ success: boolean; publicUrl: string; error?: string }> {
   const defaultPublicUrl = `${cleanCreds.publicDomain}/${Date.now()}-${file.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-')}`;
 
+  // Forçar video/mp4 para vídeos no R2 para compatibilidade total de reprodução nos navegadores
+  const lowerName = file.name.toLowerCase();
+  const isVideo = lowerName.endsWith('.mov') || lowerName.endsWith('.mp4') || lowerName.endsWith('.m4v') || lowerName.endsWith('.webm');
+  const uploadContentType = isVideo ? 'video/mp4' : (file.type || 'video/mp4');
+
   let presignData: any = {};
   try {
     let presignRes = await fetch('/api/r2/presign', {
@@ -377,7 +382,7 @@ async function uploadViaPresignedUrl(
         folderPath: cleanCreds.folderPath,
         publicDomain: cleanCreds.publicDomain,
         fileName: file.name,
-        contentType: file.type || 'video/mp4',
+        contentType: uploadContentType,
       }),
     });
 
@@ -390,7 +395,7 @@ async function uploadViaPresignedUrl(
         folderPath: cleanCreds.folderPath,
         publicDomain: cleanCreds.publicDomain,
         fileName: file.name,
-        contentType: file.type || 'video/mp4',
+        contentType: uploadContentType,
       });
       presignRes = await fetch(`/api/r2/presign?${params.toString()}`, {
         method: 'GET',
@@ -409,7 +414,7 @@ async function uploadViaPresignedUrl(
       presignData = await generatePresignedUrlClientSide(
         cleanCreds,
         file.name,
-        file.type || 'video/mp4'
+        uploadContentType
       );
     } catch (err: any) {
       if (log) log(`⚠️ Falha ao gerar URL pré-assinada no navegador: ${err?.message}`);
@@ -427,7 +432,7 @@ async function uploadViaPresignedUrl(
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', presignData.presignedUrl);
-    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+    xhr.setRequestHeader('Content-Type', uploadContentType);
 
     if (xhr.upload) {
       xhr.upload.onprogress = (e) => {

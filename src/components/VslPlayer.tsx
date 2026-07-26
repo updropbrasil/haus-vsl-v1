@@ -65,25 +65,24 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   // Fallback URL state (Se o vídeo principal falhar por adblocker ou rede, muda pro domínio secundário)
   const [usingFallbackUrl, setUsingFallbackUrl] = useState(false);
   const [hasVideoError, setHasVideoError] = useState(false);
-  const [videoErrorMessage, setVideoErrorMessage] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
   const activeVideoSrc = usingFallbackUrl && project.secondaryVideoUrl ? project.secondaryVideoUrl : project.videoUrl;
 
   const handleVideoError = () => {
     if (!usingFallbackUrl && project.secondaryVideoUrl) {
-      console.warn('⚠️ URL principal do vídeo falhou. Alternando automaticamente para o Domínio Secundário / Reserva!');
+      console.warn('⚠️ URL principal do vídeo falhou. Alternando automaticamente para o Domínio Secundário!');
       setUsingFallbackUrl(true);
+    } else if (retryCount < 2) {
+      // Tenta recarregar o elemento de vídeo automaticamente antes de exibir mensagem de erro
+      console.warn(`🔄 Tentando recarregar o vídeo (tentativa ${retryCount + 1})...`);
+      setRetryCount((prev) => prev + 1);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.load();
+        }
+      }, 500);
     } else {
       setHasVideoError(true);
-      const isMov = activeVideoSrc?.toLowerCase().endsWith('.mov');
-      if (isMov) {
-        setVideoErrorMessage(
-          'Vídeos .MOV de iPhone (codec HEVC/ProRes) não rodam nativamente nos navegadores Chrome/Windows. Converta ou exporte seu vídeo para .MP4 (H.264) para compatibilidade universal.'
-        );
-      } else {
-        setVideoErrorMessage(
-          'Não foi possível carregar o vídeo. Verifique se o bucket R2 possui "Acesso Público" ativado ou se a URL pública do Cloudflare está correta.'
-        );
-      }
     }
   };
 
@@ -111,7 +110,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   // Autoplay mudo imediato ao carregar a página / trocar vídeo
   useEffect(() => {
     setHasVideoError(false);
-    setVideoErrorMessage('');
     if (videoRef.current) {
       videoRef.current.muted = true;
       setIsMuted(true);
@@ -505,7 +503,11 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             className="w-full h-full object-contain"
             preload="auto"
             onTimeUpdate={handleTimeUpdate}
-            onLoadedMetadata={handleLoadedMetadata}
+            onLoadedMetadata={() => {
+              setHasVideoError(false);
+              setRetryCount(0);
+              handleLoadedMetadata();
+            }}
             onError={handleVideoError}
             onEnded={() => {
               setIsPlaying(false);
@@ -521,38 +523,26 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             muted
             autoPlay
             {...({ 'webkit-playsinline': 'true', 'x5-playsinline': 'true' } as any)}
-          />
+          >
+            <source src={activeVideoSrc} type="video/mp4" />
+            <source src={activeVideoSrc} type="video/quicktime" />
+            <source src={activeVideoSrc} />
+          </video>
 
           {/* Overlay de Erro no Vídeo */}
           {hasVideoError && (
             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-md p-5 sm:p-6 text-center overflow-y-auto">
-              <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mb-2.5 shrink-0">
+              <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mb-2.5 shrink-0">
                 <Flame className="w-6 h-6" />
               </div>
 
-              <h4 className="text-white font-black text-sm sm:text-base mb-1.5">
-                {activeVideoSrc?.toLowerCase().endsWith('.mov')
-                  ? '⚠️ Formato .MOV Não Compatível no Navegador'
-                  : 'Vídeo Indisponível ou Bloqueado no R2'}
+              <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5">
+                Erro ao Carregar Vídeo do R2
               </h4>
 
-              {activeVideoSrc?.toLowerCase().endsWith('.mov') ? (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 max-w-md text-left mb-3.5 space-y-1.5">
-                  <p className="text-amber-300 font-bold text-xs flex items-center gap-1.5">
-                    <span>📱 Vídeo do iPhone (.MOV / HEVC) Detectado</span>
-                  </p>
-                  <p className="text-neutral-300 text-[11px] leading-relaxed">
-                    Navegadores como o <strong>Google Chrome no Windows e Android</strong> não possuem suporte nativo para decodificar vídeos <code>.MOV</code> do iPhone (codec H.265/HEVC).
-                  </p>
-                  <p className="text-amber-200/90 text-[11px] font-semibold">
-                    💡 Solução: Salve ou converta seu vídeo para formato <strong>.MP4 (codec H.264)</strong> antes de subir para o R2.
-                  </p>
-                </div>
-              ) : (
-                <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
-                  O navegador não conseguiu reproduzir o vídeo. Verifique se o bucket no Cloudflare R2 possui <strong>Acesso Público (R2.dev Subdomain ou Domínio Personalizado)</strong> ativado nas configurações.
-                </p>
-              )}
+              <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
+                Não foi possível reproduzir este vídeo. Verifique se o bucket no Cloudflare R2 possui <strong>Acesso Público</strong> (Domínio .r2.dev ou personalizado ativado) ou se o link direto está acessível.
+              </p>
 
               {/* URL do Vídeo para Depuração */}
               {activeVideoSrc && (
@@ -577,6 +567,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                 <button
                   onClick={() => {
                     setHasVideoError(false);
+                    setRetryCount(0);
                     if (videoRef.current) {
                       videoRef.current.load();
                     }
