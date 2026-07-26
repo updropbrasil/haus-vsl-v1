@@ -329,20 +329,20 @@ export async function uploadFileToR2(
     };
   }
 
-  // 1. Tenta envio através do Servidor Backend Express Node.js (Imune a restrições de CORS e presigned URL do navegador)
-  log(`📡 Transmitindo arquivo via servidor backend Node.js...`);
-  const proxyResult = await uploadViaServerProxy(file, cleanCreds, onProgress, log);
-  if (proxyResult.success) {
-    return proxyResult;
-  }
-
-  log(`⚠️ Envio via servidor proxy indisponível (${proxyResult.error}). Alternando para URL pré-assinada direta...`);
-
-  // 2. Fallback: Presigned URL direto do navegador
+  // 1. Prioriza envio via URL pré-assinada direta (Cloudflare R2 S3) com streaming do navegador
   log(`⚡ Gerando URL pré-assinada de upload direto para o Cloudflare R2...`);
   const presignResult = await uploadViaPresignedUrl(file, cleanCreds, onProgress, log);
   if (presignResult.success) {
     return presignResult;
+  }
+
+  log(`⚠️ Envio via URL pré-assinada indisponível (${presignResult.error}). Alternando para o servidor backend Node.js...`);
+
+  // 2. Fallback: Transmissão via Servidor Backend Express Node.js
+  log(`📡 Transmitindo arquivo via servidor backend Node.js...`);
+  const proxyResult = await uploadViaServerProxy(file, cleanCreds, onProgress, log);
+  if (proxyResult.success) {
+    return proxyResult;
   }
 
   log(`❌ Falha no upload R2: ${presignResult.error || proxyResult.error || 'Não foi possível completar o envio.'}`);

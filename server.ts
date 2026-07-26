@@ -245,78 +245,80 @@ async function startServer() {
       const cleanProjectsMap = new Map<string, any>();
       let newAddedCount = 0;
 
-      for (const obj of videoObjects) {
-        if (!obj.Key) continue;
-        const key = obj.Key;
-        const rawFileName = key.split('/').pop() || key;
-        const publicUrl = `${publicDomain}/${key}`;
-        const streamUrl = `/api/r2/stream?key=${encodeURIComponent(key)}`;
+      await Promise.all(
+        videoObjects.map(async (obj) => {
+          if (!obj.Key) return;
+          const key = obj.Key;
+          const rawFileName = key.split('/').pop() || key;
+          const publicUrl = `${publicDomain}/${key}`;
+          const streamUrl = `/api/r2/stream?key=${encodeURIComponent(key)}`;
 
-        let presignedUrl = publicUrl;
-        try {
-          const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
-          presignedUrl = await getSignedUrl(s3Client, getCmd, { expiresIn: 604800 });
-        } catch (e) {}
+          let presignedUrl = publicUrl;
+          try {
+            const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
+            presignedUrl = await getSignedUrl(s3Client, getCmd, { expiresIn: 604800 });
+          } catch (e) {}
 
-        const existingProject = savedServerProjects.find((p: any) => {
-          if (!p || !p.videoUrl) return false;
-          if (p.fileKey === key) return true;
-          const urlClean = p.videoUrl.split('?')[0];
-          if (urlClean.endsWith(`/${key}`) || urlClean.includes(encodeURIComponent(key)) || urlClean.includes(rawFileName)) return true;
-          if (p.secondaryVideoUrl && p.secondaryVideoUrl.includes(encodeURIComponent(key))) return true;
-          return false;
-        });
+          const existingProject = savedServerProjects.find((p: any) => {
+            if (!p || !p.videoUrl) return false;
+            if (p.fileKey === key) return true;
+            const urlClean = p.videoUrl.split('?')[0];
+            if (urlClean.endsWith(`/${key}`) || urlClean.includes(encodeURIComponent(key)) || urlClean.includes(rawFileName)) return true;
+            if (p.secondaryVideoUrl && p.secondaryVideoUrl.includes(encodeURIComponent(key))) return true;
+            return false;
+          });
 
-        if (existingProject) {
-          const updatedProj = {
-            ...existingProject,
-            fileKey: key,
-            videoUrl: streamUrl,
-            secondaryVideoUrl: presignedUrl,
-          };
-          cleanProjectsMap.set(key, updatedProj);
-        } else {
-          let formattedTitle = rawFileName
-            .replace(/\.[^/.]+$/, '')
-            .replace(/^\d+-/, '')
-            .replace(/[-_]+/g, ' ')
-            .trim();
-
-          if (!formattedTitle || formattedTitle.length < 2) {
-            formattedTitle = `Vídeo R2 (${rawFileName})`;
+          if (existingProject) {
+            const updatedProj = {
+              ...existingProject,
+              fileKey: key,
+              videoUrl: streamUrl,
+              secondaryVideoUrl: presignedUrl,
+            };
+            cleanProjectsMap.set(key, updatedProj);
           } else {
-            formattedTitle = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1);
-          }
+            let formattedTitle = rawFileName
+              .replace(/\.[^/.]+$/, '')
+              .replace(/^\d+-/, '')
+              .replace(/[-_]+/g, ' ')
+              .trim();
 
-          const newProject = {
-            id: `vsl-r2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            title: formattedTitle,
-            description: `Vídeo importado automaticamente do Cloudflare R2 (${rawFileName})`,
-            fileKey: key,
-            videoUrl: streamUrl,
-            secondaryVideoUrl: presignedUrl,
-            aspectRatio: '16:9',
-            durationSeconds: 180,
-            createdAt: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date().toISOString(),
-            totalViews: 0,
-            plays: 0,
-            completionCount: 0,
-            avgWatchTimeSeconds: 0,
-            pitchConfig: {
-              pitchTimeSeconds: 60,
-              ctaText: 'COMPRAR COM DESCONTO EXCLUSIVO',
-              ctaUrl: 'https://seuempreendimento.com.br/checkout',
-              ctaButtonColor: '#059669',
-              pulseEffect: true,
-              showCountdown: true,
-            },
-            retentionData: [],
-            events: [],
-          };
-          cleanProjectsMap.set(key, newProject);
-          newAddedCount++;
-        }
-      }
+            if (!formattedTitle || formattedTitle.length < 2) {
+              formattedTitle = `Vídeo R2 (${rawFileName})`;
+            } else {
+              formattedTitle = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1);
+            }
+
+            const newProject = {
+              id: `vsl-r2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+              title: formattedTitle,
+              description: `Vídeo importado automaticamente do Cloudflare R2 (${rawFileName})`,
+              fileKey: key,
+              videoUrl: streamUrl,
+              secondaryVideoUrl: presignedUrl,
+              aspectRatio: '16:9',
+              durationSeconds: 180,
+              createdAt: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date().toISOString(),
+              totalViews: 0,
+              plays: 0,
+              completionCount: 0,
+              avgWatchTimeSeconds: 0,
+              pitchConfig: {
+                pitchTimeSeconds: 60,
+                ctaText: 'COMPRAR COM DESCONTO EXCLUSIVO',
+                ctaUrl: 'https://seuempreendimento.com.br/checkout',
+                ctaButtonColor: '#059669',
+                pulseEffect: true,
+                showCountdown: true,
+              },
+              retentionData: [],
+              events: [],
+            };
+            cleanProjectsMap.set(key, newProject);
+            newAddedCount++;
+          }
+        })
+      );
 
       const nonR2Projects = savedServerProjects.filter((p: any) => {
         const url = p.videoUrl || '';
@@ -604,14 +606,14 @@ async function startServer() {
   // API Route para Gerar Presigned URL para Upload Direto
   app.all('/api/r2/presign', async (req, res) => {
     try {
-      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string);
-      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string)?.trim();
-      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string)?.trim();
+      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string || savedServerR2Config?.accountId || DEFAULT_R2_CONFIG.accountId);
+      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string || savedServerR2Config?.accessKeyId || DEFAULT_R2_CONFIG.accessKeyId)?.trim();
+      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string || savedServerR2Config?.secretAccessKey || DEFAULT_R2_CONFIG.secretAccessKey)?.trim();
       const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
-        req.body?.bucketName || req.query?.bucketName as string,
-        req.body?.folderPath || req.query?.folderPath as string
+        req.body?.bucketName || req.query?.bucketName as string || savedServerR2Config?.bucketName || DEFAULT_R2_CONFIG.bucketName,
+        req.body?.folderPath || req.query?.folderPath as string || savedServerR2Config?.folderPath || DEFAULT_R2_CONFIG.folderPath
       );
-      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string) || 'https://pub-vsl-optima.r2.dev').trim().replace(/\/+$/, '');
+      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string || savedServerR2Config?.publicDomain || DEFAULT_R2_CONFIG.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev')).trim().replace(/\/+$/, '');
       const fileName = (req.body?.fileName || req.query?.fileName as string)?.trim();
       const contentType = (req.body?.contentType || req.query?.contentType as string)?.trim() || 'video/mp4';
 
