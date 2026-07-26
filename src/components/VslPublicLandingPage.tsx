@@ -87,11 +87,11 @@ export const VslPublicLandingPage: React.FC<VslPublicLandingPageProps> = ({
       )}
 
       {/* CONTEÚDO DA LANDING PAGE */}
-      <div className="relative z-10 w-full max-w-5xl mx-auto px-4 py-8 sm:py-12 flex-1 flex flex-col items-center justify-center space-y-6 sm:space-y-8">
+      <div className="relative z-10 w-full max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-12 flex-1 flex flex-col items-center justify-center space-y-5 sm:space-y-8">
         {/* HEADLINE & SUBHEADLINE */}
-        <div className="text-center space-y-3 max-w-3xl animate-fade-in">
+        <div className="text-center space-y-2.5 max-w-3xl animate-fade-in">
           <div
-            className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider mb-2 animate-pulse border shadow-sm"
+            className="inline-flex items-center gap-2 px-3 py-0.5 sm:px-3.5 sm:py-1 rounded-full text-[10px] sm:text-[11px] font-bold uppercase tracking-wider mb-1.5 sm:mb-2 animate-pulse border shadow-sm"
             style={{
               backgroundColor: lpConfig.primaryColor ? `${lpConfig.primaryColor}25` : '#e11d4825',
               borderColor: lpConfig.primaryColor ? `${lpConfig.primaryColor}50` : '#e11d4850',
@@ -106,7 +106,7 @@ export const VslPublicLandingPage: React.FC<VslPublicLandingPageProps> = ({
           </div>
 
           <h1
-            className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight leading-tight drop-shadow-md"
+            className="text-xl sm:text-3xl md:text-5xl font-black tracking-tight leading-snug sm:leading-tight drop-shadow-md px-1"
             style={{ color: lpConfig.headlineColor || '#ffffff' }}
           >
             {lpConfig.headline}
@@ -114,7 +114,7 @@ export const VslPublicLandingPage: React.FC<VslPublicLandingPageProps> = ({
 
           {lpConfig.subheadline && (
             <p
-              className="text-sm sm:text-lg font-medium max-w-2xl mx-auto leading-relaxed drop-shadow"
+              className="text-xs sm:text-base md:text-lg font-medium max-w-2xl mx-auto leading-relaxed drop-shadow px-2"
               style={{ color: lpConfig.subheadlineColor || '#cbd5e1' }}
             >
               {lpConfig.subheadline}
@@ -123,7 +123,7 @@ export const VslPublicLandingPage: React.FC<VslPublicLandingPageProps> = ({
         </div>
 
         {/* CONTAINER DO PLAYER VSL EM DESTAQUE CINEMA */}
-        <div className="w-full shadow-2xl rounded-2xl overflow-hidden border border-neutral-800/80 bg-neutral-950/80 backdrop-blur-md p-2 sm:p-4 animate-scale-up">
+        <div className="w-full shadow-2xl rounded-xl sm:rounded-2xl overflow-hidden border border-neutral-800/80 bg-neutral-950/80 backdrop-blur-md p-1.5 sm:p-4 animate-scale-up">
           <VslPlayer
             project={project}
             onTrackEvent={onTrackEvent}
@@ -131,16 +131,16 @@ export const VslPublicLandingPage: React.FC<VslPublicLandingPageProps> = ({
           />
         </div>
 
-        {/* SELOS DO EMPREENDIMENTO / OFERTA (CUSTOMIZÁVEIS PELO ADMIN) */}
+        {/* SELOS DO EMPREENDIMENTO / OFERTA (ORGANIZADOS EM 2 COLUNAS NO MOBILE) */}
         {lpConfig.showSecurityBadges && badgesToDisplay.length > 0 && (
-          <div className="pt-4 flex flex-wrap items-center justify-center gap-3 text-neutral-200 text-xs font-semibold">
+          <div className="pt-2 sm:pt-4 grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-2 sm:gap-3 text-neutral-200 text-[11px] sm:text-xs font-semibold w-full max-w-3xl">
             {badgesToDisplay.map((badgeText, idx) => (
               <div
                 key={idx}
-                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-neutral-900/90 border border-neutral-800 shadow-sm backdrop-blur-sm hover:border-neutral-700 transition-all"
+                className="flex items-center justify-center sm:justify-start gap-1.5 px-2.5 py-2 sm:px-3.5 rounded-xl bg-neutral-900/90 border border-neutral-800 shadow-sm backdrop-blur-sm hover:border-neutral-700 transition-all text-center sm:text-left"
               >
-                <Building2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{badgeText}</span>
+                <Building2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="truncate">{badgeText}</span>
               </div>
             ))}
           </div>

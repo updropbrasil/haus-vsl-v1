@@ -384,11 +384,11 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   const getContainerAspectClass = () => {
     switch (currentAspect) {
       case '9:16':
-        return 'aspect-[9/16] w-full max-w-[340px] sm:max-w-[380px] mx-auto shadow-2xl';
+        return 'aspect-[9/16] w-full max-w-[320px] sm:max-w-[380px] max-h-[75vh] mx-auto shadow-2xl';
       case '1:1':
-        return 'aspect-square w-full max-w-[480px] mx-auto shadow-2xl';
+        return 'aspect-square w-full max-w-[420px] max-h-[65vh] mx-auto shadow-2xl';
       case '4:5':
-        return 'aspect-[4/5] w-full max-w-[420px] mx-auto shadow-2xl';
+        return 'aspect-[4/5] w-full max-w-[380px] max-h-[70vh] mx-auto shadow-2xl';
       case '16:9':
       default:
         return 'aspect-video w-full max-w-4xl mx-auto shadow-2xl';
@@ -509,20 +509,20 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           {showSmartUnmuteOverlay && (
             <div
               onClick={handleUnmuteAndFullscreen}
-              className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-6 text-center animate-fade-in cursor-pointer select-none group/unmute"
+              className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-6 text-center animate-fade-in cursor-pointer select-none group/unmute"
             >
-              <div className="relative mb-5">
-                <div className="absolute -inset-6 rounded-full bg-indigo-500/30 animate-ping" />
-                <div className="relative flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 text-white shadow-2xl group-hover/unmute:scale-110 transition-all duration-300">
-                  <Volume2 className="w-10 h-10 sm:w-12 sm:h-12 fill-current animate-bounce" />
+              <div className="relative mb-2 sm:mb-4">
+                <div className="absolute -inset-3 sm:-inset-6 rounded-full bg-indigo-500/30 animate-ping" />
+                <div className="relative flex items-center justify-center w-12 h-12 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 text-white shadow-2xl group-hover/unmute:scale-110 transition-all duration-300">
+                  <Volume2 className="w-6 h-6 sm:w-10 sm:h-10 fill-current animate-bounce" />
                 </div>
               </div>
 
-              <div className="px-6 py-3.5 rounded-2xl bg-neutral-900/90 border border-indigo-500/50 shadow-2xl space-y-1.5 max-w-sm">
-                <h3 className="text-sm sm:text-base font-black text-white tracking-wider uppercase flex items-center justify-center gap-2">
+              <div className="px-3.5 py-2 sm:px-6 sm:py-3.5 rounded-xl sm:rounded-2xl bg-neutral-900/90 border border-indigo-500/50 shadow-2xl space-y-0.5 sm:space-y-1.5 max-w-[280px] sm:max-w-sm">
+                <h3 className="text-xs sm:text-base font-black text-white tracking-wider uppercase flex items-center justify-center gap-1.5">
                   <span>🔊 CLIQUE PARA ASSISTIR COM SOM</span>
                 </h3>
-                <p className="text-[11px] text-neutral-300 font-medium leading-relaxed">
+                <p className="text-[10px] sm:text-[11px] text-neutral-300 font-medium leading-tight sm:leading-relaxed">
                   O vídeo reiniciará do começo com áudio em Tela Cheia 🎬
                 </p>
               </div>
