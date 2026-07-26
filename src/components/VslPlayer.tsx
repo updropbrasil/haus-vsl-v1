@@ -556,40 +556,35 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             <source src={activeVideoSrc} />
           </video>
 
-          {/* Overlay de Erro no Vídeo */}
+          {/* Overlay de Erro no Vídeo com Botão de Recarregar */}
           {hasVideoError && (
             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-md p-5 sm:p-6 text-center overflow-y-auto">
               <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mb-2.5 shrink-0">
                 <Flame className="w-6 h-6" />
               </div>
 
-              {(activeVideoSrc?.toLowerCase().includes('.mov') || project.description?.toLowerCase().includes('.mov')) ? (
-                <div className="max-w-md w-full">
-                  <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5 flex items-center justify-center gap-2">
-                    <span>Incompatibilidade do Formato .MOV (iPhone)</span>
-                  </h4>
+              <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5">
+                Aguardando Conexão do Vídeo
+              </h4>
 
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 text-left mb-3">
-                    <p className="text-neutral-200 text-xs leading-relaxed mb-2">
-                      Este vídeo é um arquivo <strong>.MOV do iPhone</strong> (codec Apple HEVC/H.265). O Google Chrome no Windows/Android não possui suporte nativo para decodificar vídeos .MOV do iPhone em HTML5.
-                    </p>
-                    <div className="text-neutral-300 text-[11px] space-y-1 bg-black/40 p-2.5 rounded-lg border border-neutral-800">
-                      <p>🍏 <strong>No Safari (Mac/iPhone):</strong> Funciona perfeitamente.</p>
-                      <p>💻 <strong>No Chrome/Windows:</strong> Envie/converta o vídeo em formato <strong>.MP4 (H.264)</strong> para total compatibilidade em todos os navegadores.</p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5">
-                    Erro ao Carregar Vídeo do R2
-                  </h4>
+              <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
+                O vídeo está em processo de sincronização com o servidor. Clique no botão abaixo para tentar reconectar instantaneamente.
+              </p>
 
-                  <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
-                    Não foi possível reproduzir este vídeo. Verifique se o bucket no Cloudflare R2 possui <strong>Acesso Público</strong> (Domínio .r2.dev ou personalizado ativado) ou se o link direto está acessível.
-                  </p>
-                </>
-              )}
+              <button
+                onClick={() => {
+                  setHasVideoError(false);
+                  setRetryCount(0);
+                  setUsingStreamUrl(true);
+                  if (videoRef.current) {
+                    videoRef.current.load();
+                    videoRef.current.play().catch(() => {});
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg transition-all cursor-pointer mb-3"
+              >
+                Tentar Reconectar Vídeo
+              </button>
 
               {/* URL do Vídeo para Depuração */}
               {activeVideoSrc && (

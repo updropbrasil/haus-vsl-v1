@@ -1,8 +1,9 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import multer from 'multer';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import { createServer as createViteServer } from 'vite';
@@ -499,7 +500,7 @@ async function startServer() {
   // API Route para Streaming Direto de Vídeos do Cloudflare R2 (Suporte a Range Requests HTTP 206)
   app.get('/api/r2/stream', async (req, res) => {
     try {
-      const rawKey = (req.query.key as string || '').trim();
+      let rawKey = (req.query.key as string || '').trim();
       if (!rawKey) return res.status(400).send('Key do arquivo é obrigatória.');
 
       const accountId = cleanAccountId((req.query.accountId as string) || savedServerR2Config?.accountId || '');
@@ -520,6 +521,17 @@ async function startServer() {
           secretAccessKey,
         },
       });
+
+      // Se for um arquivo .mov, verifica se já existe uma versão .mp4 convertida no R2
+      if (rawKey.toLowerCase().endsWith('.mov')) {
+        const mp4Key = rawKey.replace(/\.mov$/i, '.mp4');
+        try {
+          await s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: mp4Key }));
+          rawKey = mp4Key; // Redireciona de forma transparente para a versão MP4 (H.264 / AAC) universal
+        } catch (e) {
+          // Se não existir o .mp4 ainda, transmite o .mov original enquanto o script de conversão roda
+        }
+      }
 
       const rangeHeader = req.headers.range;
       const getObjectParams: any = {
@@ -728,10 +740,35 @@ async function startServer() {
         publicDomain = `https://${publicDomain}`;
       }
 
-      const cleanFileName = file.originalname
+      let cleanFileName = file.originalname
         .toLowerCase()
         .replace(/[^a-z0-9.]+/g, '-')
         .replace(/-+/g, '-');
+
+      let uploadBuffer = file.buffer;
+
+      // Se o arquivo for .MOV de iPhone/Mac, transcodifica automaticamente para MP4 (H.264 / AAC) usando ffmpeg
+      if (cleanFileName.endsWith('.mov') || (file.mimetype && file.mimetype.includes('quicktime'))) {
+        cleanFileName = cleanFileName.replace(/\.mov$/i, '.mp4');
+        if (!cleanFileName.endsWith('.mp4')) cleanFileName += '.mp4';
+
+        const tmpIn = `/tmp/up_in_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.mov`;
+        const tmpOut = `/tmp/up_out_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.mp4`;
+        try {
+          console.log(`[R2 UPLOAD ROUTE] Transcodificando .MOV do iPhone para .MP4 (H.264 / AAC) antes de salvar no R2...`);
+          fs.writeFileSync(tmpIn, file.buffer);
+          execSync(`ffmpeg -y -i "${tmpIn}" -c:v libx264 -preset ultrafast -crf 24 -c:a aac -movflags +faststart "${tmpOut}"`);
+          if (fs.existsSync(tmpOut)) {
+            uploadBuffer = fs.readFileSync(tmpOut);
+            console.log(`[R2 UPLOAD ROUTE] Transcodificação para MP4 concluída com sucesso! Tamanho final: ${uploadBuffer.length} bytes.`);
+          }
+        } catch (transcodeErr) {
+          console.warn(`[R2 UPLOAD ROUTE] Aviso na transcodificação do vídeo (usando buffer original):`, transcodeErr);
+        } finally {
+          if (fs.existsSync(tmpIn)) fs.unlinkSync(tmpIn);
+          if (fs.existsSync(tmpOut)) fs.unlinkSync(tmpOut);
+        }
+      }
 
       const timestamp = Date.now();
       const fileKey = folderPath
@@ -765,7 +802,7 @@ async function startServer() {
         params: {
           Bucket: bucketName,
           Key: fileKey,
-          Body: file.buffer,
+          Body: uploadBuffer,
           ContentType: targetContentType,
         },
       });
