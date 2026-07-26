@@ -355,23 +355,33 @@ async function startServer() {
     }
   });
 
-  // API Route: Buscar Todos os Projetos do Servidor
+  // API Route: Buscar Todos os Projetos do Servidor (Auto-sincroniza sempre com o R2)
   app.get('/api/projects', async (req, res) => {
-    if (savedServerProjects.length === 0) {
+    try {
       await syncR2BucketInternal();
-    }
+    } catch (e) {}
     return res.json({
       success: true,
       projects: savedServerProjects,
     });
   });
 
-  // API Route: Salvar/Atualizar Projetos no Servidor
-  app.post('/api/projects', (req, res) => {
+  // API Route: Salvar/Atualizar Projetos no Servidor (Mescla sem perder vídeos do R2)
+  app.post('/api/projects', async (req, res) => {
     try {
       const { projects, project } = req.body;
       if (Array.isArray(projects)) {
-        persistProjectsToServer(projects);
+        const mergedMap = new Map<string, any>();
+        savedServerProjects.forEach((p: any) => {
+          if (p && p.id) mergedMap.set(p.id, p);
+        });
+        projects.forEach((p: any) => {
+          if (p && p.id) {
+            const existing = mergedMap.get(p.id) || {};
+            mergedMap.set(p.id, { ...existing, ...p });
+          }
+        });
+        persistProjectsToServer(Array.from(mergedMap.values()));
         return res.json({ success: true, projects: savedServerProjects });
       } else if (project && project.id) {
         const index = savedServerProjects.findIndex((p: any) => p.id === project.id);
@@ -527,10 +537,19 @@ async function startServer() {
       const ext = rawKey.split('.').pop()?.toLowerCase();
       let contentType = 'video/mp4';
       if (ext === 'webm') contentType = 'video/webm';
-      else if (ext === 'mov') contentType = 'video/quicktime';
-      else if (ext === 'm4v') contentType = 'video/x-m4v';
 
-      res.setHeader('Content-Type', r2Response.ContentType || contentType);
+      let finalContentType = r2Response.ContentType || contentType;
+      if (
+        finalContentType.includes('quicktime') ||
+        finalContentType.includes('mov') ||
+        ext === 'mov' ||
+        ext === 'm4v' ||
+        ext === 'mp4'
+      ) {
+        finalContentType = 'video/mp4';
+      }
+
+      res.setHeader('Content-Type', finalContentType);
       res.setHeader('Accept-Ranges', 'bytes');
 
       if (r2Response.ContentRange) {

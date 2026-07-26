@@ -69,10 +69,12 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   const [retryCount, setRetryCount] = useState(0);
 
   let activeVideoSrc = project.videoUrl;
-  if (usingStreamUrl) {
-    const rawKey = project.videoUrl?.includes('key=')
+  if (project.fileKey && !usingFallbackUrl) {
+    activeVideoSrc = `/api/r2/stream?key=${encodeURIComponent(project.fileKey)}`;
+  } else if (usingStreamUrl) {
+    const rawKey = project.fileKey || (project.videoUrl?.includes('key=')
       ? decodeURIComponent(project.videoUrl.split('key=')[1]?.split('&')[0] || '')
-      : project.videoUrl?.replace(/^https?:\/\/[^/]+\//, '');
+      : project.videoUrl?.replace(/^https?:\/\/[^/]+\//, ''));
     if (rawKey) {
       activeVideoSrc = `/api/r2/stream?key=${encodeURIComponent(rawKey)}`;
     } else if (project.secondaryVideoUrl) {
@@ -524,7 +526,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           <video
             key={activeVideoSrc}
             ref={videoRef}
-            src={activeVideoSrc}
             poster={project.thumbnailUrl}
             className="w-full h-full object-contain"
             preload="auto"
@@ -551,7 +552,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             {...({ 'webkit-playsinline': 'true', 'x5-playsinline': 'true' } as any)}
           >
             <source src={activeVideoSrc} type="video/mp4" />
-            <source src={activeVideoSrc} type="video/quicktime" />
+            <source src={activeVideoSrc} type="video/webm" />
             <source src={activeVideoSrc} />
           </video>
 

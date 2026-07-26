@@ -252,7 +252,7 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
         setTestStatus({
           success: true,
           message: isMov
-            ? '✅ Arquivo .MOV enviado com sucesso! Nota: vídeos .MOV do iPhone (codec HEVC) só rodam no Safari/Mac. Recomenda-se usar .MP4 para suporte em todos os navegadores (Chrome/Windows).'
+            ? '✅ Arquivo .MOV enviado para o Cloudflare R2! (Dica: arquivos .MOV usam codec HEVC do iPhone e funcionam nativamente no Safari/Mac. Em navegadores Windows/Chrome, recomenda-se converter para .MP4).'
             : '✅ Arquivo enviado e hospedado no Cloudflare R2 com sucesso!',
         });
       } else {
@@ -369,11 +369,25 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
   const handleCreateVslWithR2 = () => {
     if (!uploadedPublicUrl || !onAddProject) return;
 
+    let fileKey = '';
+    if (uploadedPublicUrl.includes('/vsl-haus/')) {
+      fileKey = 'vsl-haus/' + uploadedPublicUrl.split('/vsl-haus/')[1].split('?')[0];
+    } else if (uploadedPublicUrl.startsWith('http')) {
+      try {
+        const u = new URL(uploadedPublicUrl);
+        fileKey = u.pathname.replace(/^\/+/, '');
+      } catch (e) {}
+    }
+
+    const streamUrl = fileKey ? `/api/r2/stream?key=${encodeURIComponent(fileKey)}` : uploadedPublicUrl;
+
     const newProject: VslProject = {
       id: `vsl-r2-${Date.now()}`,
       title: vslTitle || 'Novo Vídeo Cloudflare R2',
       description: vslDescription || 'Hospedado no bucket Cloudflare R2 (vsl-haus).',
-      videoUrl: uploadedPublicUrl,
+      fileKey: fileKey || undefined,
+      videoUrl: streamUrl,
+      secondaryVideoUrl: uploadedPublicUrl,
       thumbnailUrl: uploadedImageUrl || undefined,
       durationSeconds: 180,
       createdAt: new Date().toISOString(),
