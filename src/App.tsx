@@ -193,27 +193,25 @@ export default function App() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filtra mockups se houverem outros projetos
           const nonMock = parsed.filter((p: any) => {
-            const url = p.videoUrl || '';
+            const url = p?.videoUrl || '';
             return !url.includes('gtv-videos-bucket') &&
                    !url.includes('commondatastorage.googleapis.com') &&
                    !url.includes('BigBuckBunny') &&
                    p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
           });
-          if (nonMock.length > 0) return nonMock;
-          return parsed;
+          return nonMock;
         }
       }
     } catch {
       // Fallback
     }
-    return INITIAL_VSL_PROJECTS;
+    return [];
   });
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     const routeInfo = getRouteInfo(projects);
-    return routeInfo.matchedProjectId || projects[0]?.id || 'vsl-001';
+    return routeInfo.matchedProjectId || projects[0]?.id || '';
   });
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
@@ -277,7 +275,10 @@ export default function App() {
   // Busca VSLs reais do servidor, R2 e Supabase na inicialização e ao logar
   useEffect(() => {
     async function hydrateAllCredentialsAndData() {
-      // 1. Obtém credenciais salvas do Cloudflare R2
+      // 1. Hidrata credenciais do Supabase diretamente do servidor em primeiro lugar
+      await hydrateSupabaseCredentials();
+
+      // 2. Obtém credenciais salvas do Cloudflare R2
       let r2Creds: any = null;
       try {
         const stored = localStorage.getItem('vsl_cloudflare_r2_credentials');
@@ -294,7 +295,7 @@ export default function App() {
         } catch {}
       }
 
-      // 2. Tenta sincronizar automaticamente os vídeos do Cloudflare R2 enviando credenciais
+      // 3. Tenta sincronizar automaticamente os vídeos do Cloudflare R2 enviando credenciais
       let syncedProjects: VslProject[] | null = null;
       try {
         const syncRes = await fetch('/api/r2/sync-videos', {
@@ -313,7 +314,7 @@ export default function App() {
         }
       } catch {}
 
-      // 3. Se não obteve do R2, busca projetos salvos no servidor Node.js
+      // 4. Se não obteve do R2, busca projetos salvos no servidor Node.js
       if (!syncedProjects || syncedProjects.length === 0) {
         try {
           const res = await fetch('/api/projects');
@@ -326,78 +327,69 @@ export default function App() {
         } catch {}
       }
 
-      // 4. Aplica os projetos sincronizados e limpa os mockups se existirem vídeos reais
-      if (syncedProjects && syncedProjects.length > 0) {
-        const realNonMock = syncedProjects.filter((p: any) => {
-          const url = p.videoUrl || '';
-          return !url.includes('gtv-videos-bucket') &&
-                 !url.includes('commondatastorage.googleapis.com') &&
-                 !url.includes('BigBuckBunny') &&
-                 p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
-        });
+      // Filtra e remove estritamente qualquer vídeo de exemplo ou mockup
+      let activeList: VslProject[] = (syncedProjects || []).filter((p: any) => {
+        const url = p?.videoUrl || '';
+        return !url.includes('gtv-videos-bucket') &&
+               !url.includes('commondatastorage.googleapis.com') &&
+               !url.includes('BigBuckBunny') &&
+               p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+      });
 
-        const finalProjects = realNonMock.length > 0 ? realNonMock : syncedProjects;
-        setProjects(finalProjects);
-
-        const routeInfo = getRouteInfo(finalProjects);
-        if (routeInfo.matchedProjectId) {
-          setSelectedProjectId(routeInfo.matchedProjectId);
-        } else if (finalProjects.length > 0) {
-          setSelectedProjectId(finalProjects[0].id);
-        }
-      }
-
-      // 5. Hidrata credenciais do Supabase e sincroniza projetos bidirecionalmente
-      await hydrateSupabaseCredentials();
-
+      // 5. Busca VSLs cadastradas no Supabase e mescla
       try {
         const dbProjects = await fetchProjectsFromSupabase();
-        setProjects((currentProjects) => {
-          if (dbProjects && dbProjects.length > 0) {
-            const validActiveIds = new Set(currentProjects.map((p) => p.id));
-            const seenVideoFiles = new Set<string>();
+        if (dbProjects && dbProjects.length > 0) {
+          const realDbProjects = dbProjects.filter((p: any) => {
+            const url = p?.videoUrl || '';
+            return !url.includes('gtv-videos-bucket') &&
+                   !url.includes('commondatastorage.googleapis.com') &&
+                   !url.includes('BigBuckBunny') &&
+                   p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+          });
 
-            // Remove do Supabase registros duplicados ou fantasmas que não existem nos vídeos ativos do R2
-            dbProjects.forEach((dbP) => {
-              const rawFileName = dbP.videoUrl ? dbP.videoUrl.split('?')[0].split('/').pop() : dbP.id;
-              const key = rawFileName || dbP.id;
+          // Adiciona VSLs do Supabase que não estão na lista do R2
+          realDbProjects.forEach((dbP) => {
+            const exists = activeList.some((p) => p.id === dbP.id || (p.videoUrl && dbP.videoUrl && p.videoUrl.split('?')[0] === dbP.videoUrl.split('?')[0]));
+            if (!exists) {
+              activeList.push(dbP);
+            }
+          });
 
-              if (seenVideoFiles.has(key) && !validActiveIds.has(dbP.id)) {
-                // Duplicata no Supabase -> exclui para limpar o banco
-                deleteProjectFromSupabase(dbP.id);
-              } else {
-                seenVideoFiles.add(key);
-              }
-            });
-
-            const updatedList = currentProjects.map((p) => {
-              const matchedDb = dbProjects.find((dbP) => dbP.id === p.id);
-              if (matchedDb) {
-                return {
-                  ...p,
-                  pitchConfig: matchedDb.pitchConfig || p.pitchConfig,
-                  landingPageConfig: matchedDb.landingPageConfig || p.landingPageConfig,
-                  totalViews: Math.max(p.totalViews || 0, matchedDb.totalViews || 0),
-                  plays: Math.max(p.plays || 0, matchedDb.plays || 0),
-                };
-              } else {
-                // Projeto ativo ainda não existe no Supabase -> Salva automaticamente
-                syncProjectToSupabase(p);
-              }
-              return p;
-            });
-
-            return updatedList;
-          } else {
-            // Se o Supabase ainda está vazio, envia todos os vídeos ativos
-            currentProjects.forEach((p) => {
+          // Atualiza dados de pitch e configurações da landing page vindo do Supabase
+          activeList = activeList.map((p) => {
+            const matchedDb = realDbProjects.find((dbP) => dbP.id === p.id || (p.videoUrl && dbP.videoUrl && p.videoUrl.split('?')[0] === dbP.videoUrl.split('?')[0]));
+            if (matchedDb) {
+              return {
+                ...p,
+                pitchConfig: matchedDb.pitchConfig || p.pitchConfig,
+                landingPageConfig: matchedDb.landingPageConfig || p.landingPageConfig,
+                totalViews: Math.max(p.totalViews || 0, matchedDb.totalViews || 0),
+                plays: Math.max(p.plays || 0, matchedDb.plays || 0),
+              };
+            } else {
               syncProjectToSupabase(p);
-            });
-            return currentProjects;
-          }
-        });
+            }
+            return p;
+          });
+        } else {
+          activeList.forEach((p) => {
+            syncProjectToSupabase(p);
+          });
+        }
       } catch (err) {
         console.warn('Aviso na sincronização do Supabase:', err);
+      }
+
+      setProjects(activeList);
+
+      const routeInfo = getRouteInfo(activeList);
+      if (routeInfo.matchedProjectId) {
+        setSelectedProjectId(routeInfo.matchedProjectId);
+      } else if (activeList.length > 0) {
+        setSelectedProjectId(activeList[0].id);
+      } else {
+        setSelectedProjectId('');
       }
 
       setIsHydrated(true);
@@ -428,47 +420,31 @@ export default function App() {
     };
   }, [projects]);
 
-  // Handler: Limpar Dados de Exemplo (Mockup)
-  const handleClearMockData = () => {
-    if (confirm('Deseja remover todos os VSLs de exemplo/mockup e manter apenas os seus vídeos reais?')) {
-      const userProjects = projects.filter(
-        (p) => !['vsl-001', 'vsl-002', 'vsl-003'].includes(p.id)
-      );
-      if (userProjects.length > 0) {
-        setProjects(userProjects);
-        setSelectedProjectId(userProjects[0].id);
-      } else {
-        const cleanProject: VslProject = {
-          id: `vsl-real-${Date.now()}`,
-          title: 'Meu Primeiro VSL Cloudflare R2',
-          description: 'Projeto limpo para adicionar o seu vídeo do Cloudflare R2',
-          videoUrl: '',
-          durationSeconds: 180,
-          createdAt: new Date().toISOString(),
-          totalViews: 0,
-          plays: 0,
-          completionCount: 0,
-          avgWatchTimeSeconds: 0,
-          aspectRatio: '16:9',
-          pitchConfig: {
-            pitchTimeSeconds: 60,
-            ctaText: 'COMPRAR COM DESCONTO EXCLUSIVO',
-            ctaUrl: 'https://seuempreendimento.com.br/checkout',
-            ctaButtonColor: '#059669',
-            pulseEffect: true,
-            showCountdown: true,
-          },
-          retentionData: [],
-          events: [],
-        };
-        setProjects([cleanProject]);
-        setSelectedProjectId(cleanProject.id);
-        syncProjectToSupabase(cleanProject);
-      }
-    }
+  const defaultEmptyProject: VslProject = {
+    id: 'novo-vsl',
+    title: 'Nenhum VSL Cadastrado',
+    description: 'Cadastre seu primeiro VSL ou sincronize com o Cloudflare R2 / Supabase.',
+    videoUrl: '',
+    durationSeconds: 180,
+    createdAt: new Date().toISOString(),
+    totalViews: 0,
+    plays: 0,
+    completionCount: 0,
+    avgWatchTimeSeconds: 0,
+    aspectRatio: '16:9',
+    pitchConfig: {
+      pitchTimeSeconds: 60,
+      ctaText: 'COMPRAR AGORA',
+      ctaUrl: '',
+      ctaButtonColor: '#059669',
+      pulseEffect: true,
+      showCountdown: true,
+    },
+    retentionData: [],
+    events: [],
   };
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId) || projects[0];
+  const selectedProject = projects.find((p) => p.id === selectedProjectId) || projects[0] || defaultEmptyProject;
 
   // Handler: Add new project
   const handleAddProject = (newProj: VslProject) => {
@@ -624,7 +600,7 @@ export default function App() {
   // Handler: Reset Projects to Initial
   const handleResetProjects = () => {
     setProjects(INITIAL_VSL_PROJECTS);
-    setSelectedProjectId(INITIAL_VSL_PROJECTS[0].id);
+    setSelectedProjectId(INITIAL_VSL_PROJECTS[0]?.id || '');
     try {
       localStorage.setItem('vsl_projects_db', JSON.stringify(INITIAL_VSL_PROJECTS));
     } catch {}
@@ -715,15 +691,6 @@ export default function App() {
                       "{selectedProject.pitchConfig.ctaText}"
                     </strong>
                   </div>
-
-                  <button
-                    onClick={handleClearMockData}
-                    className="px-3 py-2 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border border-neutral-800 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-                    title="Remover VSLs de exemplo e manter somente seus vídeos reais"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Limpar Mockups</span>
-                  </button>
 
                   {selectedProject && (
                     <button
@@ -840,19 +807,21 @@ export default function App() {
           {/* ABA 2: LISTA DE VSLS (MEUS VÍDEOS) */}
           {activeTab === 'vsls' && (
             <div className="space-y-6 animate-fade-in">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-black text-white">Meus Vídeos de VSL</h1>
                   <p className="text-xs text-neutral-400">Gerencie e analise o desempenho de todos os seus vídeos de alta conversão.</p>
                 </div>
 
-                <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md flex items-center gap-2 transition-all cursor-pointer uppercase tracking-wider"
-                >
-                  <Plus className="w-4 h-4 stroke-[3]" />
-                  <span>Cadastrar Novo VSL</span>
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md flex items-center gap-2 transition-all cursor-pointer uppercase tracking-wider"
+                  >
+                    <Plus className="w-4 h-4 stroke-[3]" />
+                    <span>Cadastrar Novo VSL</span>
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

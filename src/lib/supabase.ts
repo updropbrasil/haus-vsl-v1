@@ -23,8 +23,9 @@ export function saveSupabaseCredentials(url: string, key: string): void {
   const cleanKey = key.trim();
   localStorage.setItem(STORAGE_URL_KEY, cleanUrl);
   localStorage.setItem(STORAGE_KEY_KEY, cleanKey);
+  cachedClient = null;
 
-  // Salva no servidor para persistência automática
+  // Salva no servidor para persistência automática em todas as sessões e deploys
   if (cleanUrl && cleanKey) {
     fetch('/api/settings/supabase', {
       method: 'POST',
@@ -35,21 +36,22 @@ export function saveSupabaseCredentials(url: string, key: string): void {
 }
 
 export async function hydrateSupabaseCredentials(): Promise<{ url: string; key: string }> {
-  let { url, key } = getSupabaseCredentials();
-  if (!url || !key) {
-    try {
-      const res = await fetch('/api/settings/supabase');
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.config?.url && data?.config?.key) {
-          url = data.config.url;
-          key = data.config.key;
-          localStorage.setItem(STORAGE_URL_KEY, url);
-          localStorage.setItem(STORAGE_KEY_KEY, key);
-        }
+  try {
+    const res = await fetch('/api/settings/supabase');
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.config?.url && data?.config?.key) {
+        const url = data.config.url.trim();
+        const key = data.config.key.trim();
+        localStorage.setItem(STORAGE_URL_KEY, url);
+        localStorage.setItem(STORAGE_KEY_KEY, key);
+        cachedClient = null; // Reseta o client cacheado para usar as credenciais atualizadas
+        return { url, key };
       }
-    } catch {}
-  }
+    }
+  } catch {}
+
+  const { url, key } = getSupabaseCredentials();
   return { url, key };
 }
 

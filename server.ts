@@ -84,20 +84,44 @@ async function startServer() {
     }
   } catch (e) {}
 
+  if (!savedServerSupabaseConfig || !savedServerSupabaseConfig.url || !savedServerSupabaseConfig.key) {
+    const envUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+    const envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+    if (envUrl && envKey) {
+      savedServerSupabaseConfig = { url: envUrl.trim(), key: envKey.trim() };
+    }
+  }
+
   // Memória e Persistência de Projetos VSL no Servidor Node.js
   let savedServerProjects: any[] = [];
   const projectsPath = path.join(process.cwd(), '.vsl-projects.json');
 
   try {
     if (fs.existsSync(projectsPath)) {
-      savedServerProjects = JSON.parse(fs.readFileSync(projectsPath, 'utf8'));
+      const rawProjects = JSON.parse(fs.readFileSync(projectsPath, 'utf8'));
+      if (Array.isArray(rawProjects)) {
+        savedServerProjects = rawProjects.filter((p: any) => {
+          const url = p?.videoUrl || '';
+          return !url.includes('gtv-videos-bucket') &&
+                 !url.includes('commondatastorage.googleapis.com') &&
+                 !url.includes('BigBuckBunny') &&
+                 p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+        });
+      }
     }
   } catch (e) {}
 
   function persistProjectsToServer(projects: any[]) {
     try {
-      savedServerProjects = projects;
-      fs.writeFileSync(projectsPath, JSON.stringify(projects, null, 2), 'utf8');
+      const cleanProjects = (projects || []).filter((p: any) => {
+        const url = p?.videoUrl || '';
+        return !url.includes('gtv-videos-bucket') &&
+               !url.includes('commondatastorage.googleapis.com') &&
+               !url.includes('BigBuckBunny') &&
+               p.id !== 'vsl-001' && p.id !== 'vsl-002' && p.id !== 'vsl-003';
+      });
+      savedServerProjects = cleanProjects;
+      fs.writeFileSync(projectsPath, JSON.stringify(cleanProjects, null, 2), 'utf8');
     } catch (e) {}
   }
 
