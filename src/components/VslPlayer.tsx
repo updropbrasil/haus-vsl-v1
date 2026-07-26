@@ -562,34 +562,68 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                 <Flame className="w-6 h-6" />
               </div>
 
-              <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5">
-                Erro ao Carregar Vídeo do R2
-              </h4>
+              {(activeVideoSrc?.toLowerCase().includes('.mov') || project.description?.toLowerCase().includes('.mov')) ? (
+                <div className="max-w-md w-full">
+                  <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5 flex items-center justify-center gap-2">
+                    <span>Incompatibilidade do Formato .MOV (iPhone)</span>
+                  </h4>
 
-              <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
-                Não foi possível reproduzir este vídeo. Verifique se o bucket no Cloudflare R2 possui <strong>Acesso Público</strong> (Domínio .r2.dev ou personalizado ativado) ou se o link direto está acessível.
-              </p>
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 text-left mb-3">
+                    <p className="text-neutral-200 text-xs leading-relaxed mb-2">
+                      Este vídeo é um arquivo <strong>.MOV do iPhone</strong> (codec Apple HEVC/H.265). O Google Chrome no Windows/Android não possui suporte nativo para decodificar vídeos .MOV do iPhone em HTML5.
+                    </p>
+                    <div className="text-neutral-300 text-[11px] space-y-1 bg-black/40 p-2.5 rounded-lg border border-neutral-800">
+                      <p>🍏 <strong>No Safari (Mac/iPhone):</strong> Funciona perfeitamente.</p>
+                      <p>💻 <strong>No Chrome/Windows:</strong> Envie/converta o vídeo em formato <strong>.MP4 (H.264)</strong> para total compatibilidade em todos os navegadores.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5">
+                    Erro ao Carregar Vídeo do R2
+                  </h4>
+
+                  <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
+                    Não foi possível reproduzir este vídeo. Verifique se o bucket no Cloudflare R2 possui <strong>Acesso Público</strong> (Domínio .r2.dev ou personalizado ativado) ou se o link direto está acessível.
+                  </p>
+                </>
+              )}
 
               {/* URL do Vídeo para Depuração */}
               {activeVideoSrc && (
-                <div className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 max-w-md w-full mb-4 text-left font-mono text-[10px] text-neutral-400 truncate select-all">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 max-w-md w-full mb-3 text-left font-mono text-[10px] text-neutral-400 truncate select-all">
                   <span className="text-neutral-500 font-sans font-semibold mr-1">URL:</span>
                   {activeVideoSrc}
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 {activeVideoSrc && (
                   <a
                     href={activeVideoSrc}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 border border-neutral-700 transition-all shadow-sm"
+                    className="px-3.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 border border-neutral-700 transition-all shadow-sm"
                   >
                     <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Abrir Link Direto em Nova Aba</span>
+                    <span>Abrir Link em Nova Aba</span>
                   </a>
                 )}
+
+                <button
+                  onClick={() => {
+                    setUsingStreamUrl((prev) => !prev);
+                    setHasVideoError(false);
+                    setRetryCount(0);
+                    setTimeout(() => videoRef.current?.load(), 100);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 border border-neutral-700 transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Alternar Rota ({usingStreamUrl ? 'URL Direta' : 'Proxy Stream'})</span>
+                </button>
+
                 <button
                   onClick={() => {
                     setHasVideoError(false);
@@ -598,7 +632,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                       videoRef.current.load();
                     }
                   }}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Tentar Novamente</span>

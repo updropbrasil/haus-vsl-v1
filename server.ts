@@ -163,8 +163,201 @@ async function startServer() {
     } catch (e) {}
   }
 
-  // API Route: Buscar Todos os Projetos do Servidor (Sincronização entre Navegadores/Sessões)
-  app.get('/api/projects', (req, res) => {
+  // Helper para Sincronizar o Bucket Cloudflare R2 com os Projetos do Servidor
+  async function syncR2BucketInternal(overrideParams?: any) {
+    try {
+      const accountId = cleanAccountId(overrideParams?.accountId || savedServerR2Config?.accountId || DEFAULT_R2_CONFIG.accountId);
+      const accessKeyId = (overrideParams?.accessKeyId || savedServerR2Config?.accessKeyId || DEFAULT_R2_CONFIG.accessKeyId)?.trim();
+      const secretAccessKey = (overrideParams?.secretAccessKey || savedServerR2Config?.secretAccessKey || DEFAULT_R2_CONFIG.secretAccessKey)?.trim();
+      const { bucket: bucketName } = cleanBucketAndFolder(
+        overrideParams?.bucketName || savedServerR2Config?.bucketName || DEFAULT_R2_CONFIG.bucketName,
+        overrideParams?.folderPath || savedServerR2Config?.folderPath || DEFAULT_R2_CONFIG.folderPath
+      );
+      const rawFolder = overrideParams?.folderPath || overrideParams?.vslFolderPath || savedServerR2Config?.folderPath || DEFAULT_R2_CONFIG.folderPath || 'vsl-haus';
+      const targetFolder = rawFolder.toString().trim().replace(/^\/+|\/+$/g, '');
+      let publicDomain = (overrideParams?.publicDomain || savedServerR2Config?.publicDomain || DEFAULT_R2_CONFIG.publicDomain || 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev').trim().replace(/\/+$/, '');
+
+      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+        console.warn('[R2 AUTO-SYNC] Credenciais incompletas para auto-sincronização.');
+        return { success: false, error: 'Credenciais incompletas.' };
+      }
+
+      if (!publicDomain.startsWith('http://') && !publicDomain.startsWith('https://')) {
+        publicDomain = `https://${publicDomain}`;
+      }
+
+      if (overrideParams && overrideParams.accountId) {
+        savedServerR2Config = {
+          accountId,
+          accessKeyId,
+          secretAccessKey,
+          bucketName,
+          folderPath: targetFolder,
+          publicDomain,
+          isConfigured: true,
+        };
+        try {
+          fs.writeFileSync(configPath, JSON.stringify(savedServerR2Config, null, 2), 'utf8');
+        } catch (e) {}
+      }
+
+      const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
+      const s3Client = new S3Client({
+        region: 'auto',
+        endpoint,
+        credentials: { accessKeyId, secretAccessKey },
+      });
+
+      console.log(`[R2 SYNC] Escaneando pasta "${targetFolder}" no bucket "${bucketName}" no Cloudflare R2...`);
+
+      const listParams: any = { Bucket: bucketName, MaxKeys: 1000 };
+      if (targetFolder) {
+        listParams.Prefix = `${targetFolder}/`;
+      }
+
+      let listRes = await s3Client.send(new ListObjectsV2Command(listParams));
+      let contents = listRes.Contents || [];
+
+      if (contents.length === 0 && targetFolder) {
+        const fallbackCmd = new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1000 });
+        const fallbackRes = await s3Client.send(fallbackCmd);
+        contents = (fallbackRes.Contents || []).filter((item) =>
+          item.Key && item.Key.toLowerCase().includes(targetFolder.toLowerCase())
+        );
+      }
+
+      const videoExtensions = ['.mp4', '.mov', '.webm', '.m4v', '.avi', '.mkv'];
+      const videoObjects = contents.filter((item) => {
+        if (!item.Key) return false;
+        const lower = item.Key.toLowerCase();
+        const isVideo = videoExtensions.some((ext) => lower.endsWith(ext));
+        if (!isVideo) return false;
+        if (targetFolder) {
+          const targetLower = targetFolder.toLowerCase();
+          return lower.startsWith(targetLower + '/') || lower.includes(targetLower);
+        }
+        return true;
+      });
+
+      console.log(`[R2 SYNC] Encontrados ${videoObjects.length} vídeo(s) na pasta "${targetFolder}".`);
+
+      const activeKeys = new Set(videoObjects.map((obj) => obj.Key).filter(Boolean));
+      const cleanProjectsMap = new Map<string, any>();
+      let newAddedCount = 0;
+
+      for (const obj of videoObjects) {
+        if (!obj.Key) continue;
+        const key = obj.Key;
+        const rawFileName = key.split('/').pop() || key;
+        const publicUrl = `${publicDomain}/${key}`;
+        const streamUrl = `/api/r2/stream?key=${encodeURIComponent(key)}`;
+
+        let presignedUrl = publicUrl;
+        try {
+          const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
+          presignedUrl = await getSignedUrl(s3Client, getCmd, { expiresIn: 604800 });
+        } catch (e) {}
+
+        const existingProject = savedServerProjects.find((p: any) => {
+          if (!p || !p.videoUrl) return false;
+          if (p.fileKey === key) return true;
+          const urlClean = p.videoUrl.split('?')[0];
+          if (urlClean.endsWith(`/${key}`) || urlClean.includes(encodeURIComponent(key)) || urlClean.includes(rawFileName)) return true;
+          if (p.secondaryVideoUrl && p.secondaryVideoUrl.includes(encodeURIComponent(key))) return true;
+          return false;
+        });
+
+        if (existingProject) {
+          const updatedProj = {
+            ...existingProject,
+            fileKey: key,
+            videoUrl: streamUrl,
+            secondaryVideoUrl: presignedUrl,
+          };
+          cleanProjectsMap.set(key, updatedProj);
+        } else {
+          let formattedTitle = rawFileName
+            .replace(/\.[^/.]+$/, '')
+            .replace(/^\d+-/, '')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+
+          if (!formattedTitle || formattedTitle.length < 2) {
+            formattedTitle = `Vídeo R2 (${rawFileName})`;
+          } else {
+            formattedTitle = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1);
+          }
+
+          const newProject = {
+            id: `vsl-r2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            title: formattedTitle,
+            description: `Vídeo importado automaticamente do Cloudflare R2 (${rawFileName})`,
+            fileKey: key,
+            videoUrl: streamUrl,
+            secondaryVideoUrl: presignedUrl,
+            aspectRatio: '16:9',
+            durationSeconds: 180,
+            createdAt: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date().toISOString(),
+            totalViews: 0,
+            plays: 0,
+            completionCount: 0,
+            avgWatchTimeSeconds: 0,
+            pitchConfig: {
+              pitchTimeSeconds: 60,
+              ctaText: 'COMPRAR COM DESCONTO EXCLUSIVO',
+              ctaUrl: 'https://seuempreendimento.com.br/checkout',
+              ctaButtonColor: '#059669',
+              pulseEffect: true,
+              showCountdown: true,
+            },
+            retentionData: [],
+            events: [],
+          };
+          cleanProjectsMap.set(key, newProject);
+          newAddedCount++;
+        }
+      }
+
+      const nonR2Projects = savedServerProjects.filter((p: any) => {
+        const url = p.videoUrl || '';
+        const isMock = url.includes('gtv-videos-bucket') ||
+                       url.includes('commondatastorage.googleapis.com') ||
+                       url.includes('BigBuckBunny') ||
+                       p.id === 'vsl-001' || p.id === 'vsl-002' || p.id === 'vsl-003';
+        if (isMock) return false;
+        if (p.fileKey && !activeKeys.has(p.fileKey)) return false;
+        if (p.id?.startsWith('vsl-r2-')) return false;
+        return true;
+      });
+
+      const baseProjects = [...Array.from(cleanProjectsMap.values()), ...nonR2Projects];
+      persistProjectsToServer(baseProjects);
+
+      return {
+        success: true,
+        message: `Sincronização concluída! ${videoObjects.length} vídeo(s) únicos no R2 (${newAddedCount} novo(s) importado(s)).`,
+        totalInR2: videoObjects.length,
+        newAdded: newAddedCount,
+        projects: baseProjects,
+      };
+    } catch (err: any) {
+      console.error('[R2 SYNC ERROR]', err);
+      return { success: false, error: err?.message || 'Falha ao sincronizar R2.' };
+    }
+  }
+
+  // Executa auto-sincronização no boot do servidor
+  syncR2BucketInternal().then((res) => {
+    if (res.success) {
+      console.log(`[R2 AUTO-SYNC BOOT SUCCESS] ${res.projects?.length || 0} vídeos sincronizados.`);
+    }
+  });
+
+  // API Route: Buscar Todos os Projetos do Servidor
+  app.get('/api/projects', async (req, res) => {
+    if (savedServerProjects.length === 0) {
+      await syncR2BucketInternal();
+    }
     return res.json({
       success: true,
       projects: savedServerProjects,
@@ -208,205 +401,11 @@ async function startServer() {
 
   // API Route: Escanear o Bucket Cloudflare R2 e Sincronizar Todos os Vídeos Existentes
   app.all('/api/r2/sync-videos', async (req, res) => {
-    try {
-      const accountId = cleanAccountId(req.body?.accountId || req.query?.accountId as string || savedServerR2Config?.accountId || '');
-      const accessKeyId = (req.body?.accessKeyId || req.query?.accessKeyId as string || savedServerR2Config?.accessKeyId || '')?.trim();
-      const secretAccessKey = (req.body?.secretAccessKey || req.query?.secretAccessKey as string || savedServerR2Config?.secretAccessKey || '')?.trim();
-      const { bucket: bucketName, folder: folderPath } = cleanBucketAndFolder(
-        req.body?.bucketName || req.query?.bucketName as string || savedServerR2Config?.bucketName || '',
-        req.body?.folderPath || req.query?.folderPath as string || savedServerR2Config?.folderPath || ''
-      );
-      // Pasta alvo prioritária vsl-haus
-      const rawFolder = req.body?.folderPath || req.body?.vslFolderPath || req.query?.folderPath || savedServerR2Config?.folderPath || 'vsl-haus';
-      const targetFolder = rawFolder.toString().trim().replace(/^\/+|\/+$/g, '');
-
-      let publicDomain = ((req.body?.publicDomain || req.query?.publicDomain as string || savedServerR2Config?.publicDomain || 'https://pub-vsl-optima.r2.dev')).trim().replace(/\/+$/, '');
-
-      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
-        return res.status(400).json({
-          success: false,
-          error: 'Credenciais do Cloudflare R2 não foram fornecidas ou configuradas no servidor.'
-        });
-      }
-
-      if (!publicDomain.startsWith('http://') && !publicDomain.startsWith('https://')) {
-        publicDomain = `https://${publicDomain}`;
-      }
-
-      // Salva e atualiza credenciais no servidor se enviadas na requisição
-      if (accountId && accessKeyId && secretAccessKey && bucketName) {
-        savedServerR2Config = {
-          accountId,
-          accessKeyId,
-          secretAccessKey,
-          bucketName,
-          folderPath: targetFolder,
-          publicDomain,
-          isConfigured: true,
-        };
-        try {
-          fs.writeFileSync(configPath, JSON.stringify(savedServerR2Config, null, 2), 'utf8');
-        } catch (e) {}
-      }
-
-      const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
-      const s3Client = new S3Client({
-        region: 'auto',
-        endpoint,
-        credentials: {
-          accessKeyId,
-          secretAccessKey,
-        },
-      });
-
-      console.log(`[R2 SYNC ROUTE] Escaneando pasta "${targetFolder}" no bucket "${bucketName}" no Cloudflare R2...`);
-
-      // Busca objetos com o prefixo da pasta vsl-haus
-      const listParams: any = { Bucket: bucketName, MaxKeys: 1000 };
-      if (targetFolder) {
-        listParams.Prefix = `${targetFolder}/`;
-      }
-
-      let listRes = await s3Client.send(new ListObjectsV2Command(listParams));
-      let contents = listRes.Contents || [];
-
-      // Caso o prefix com barra não traga resultados, faz a busca geral no bucket e filtra pela pasta
-      if (contents.length === 0 && targetFolder) {
-        const fallbackCmd = new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1000 });
-        const fallbackRes = await s3Client.send(fallbackCmd);
-        contents = (fallbackRes.Contents || []).filter((item) =>
-          item.Key && item.Key.toLowerCase().includes(targetFolder.toLowerCase())
-        );
-      }
-
-      const videoExtensions = ['.mp4', '.mov', '.webm', '.m4v', '.avi', '.mkv'];
-
-      const videoObjects = contents.filter((item) => {
-        if (!item.Key) return false;
-        const lower = item.Key.toLowerCase();
-        const isVideo = videoExtensions.some((ext) => lower.endsWith(ext));
-        if (!isVideo) return false;
-        if (targetFolder) {
-          const targetLower = targetFolder.toLowerCase();
-          return lower.startsWith(targetLower + '/') || lower.includes(targetLower);
-        }
-        return true;
-      });
-
-      console.log(`[R2 SYNC ROUTE] Encontrados ${videoObjects.length} vídeos na pasta "${targetFolder}".`);
-
-      const activeKeys = new Set(videoObjects.map((obj) => obj.Key).filter(Boolean));
-      const cleanProjectsMap = new Map<string, any>();
-      let newAddedCount = 0;
-
-      for (const obj of videoObjects) {
-        if (!obj.Key) continue;
-        const key = obj.Key;
-        const rawFileName = key.split('/').pop() || key;
-        const publicUrl = `${publicDomain}/${key}`;
-        const streamUrl = `/api/r2/stream?key=${encodeURIComponent(key)}`;
-
-        let presignedUrl = publicUrl;
-        try {
-          const getCmd = new GetObjectCommand({ Bucket: bucketName, Key: key });
-          presignedUrl = await getSignedUrl(s3Client, getCmd, { expiresIn: 604800 }); // 7 dias
-        } catch (e) {
-          console.warn('[R2 PRESIGNED URL FAIL]', e);
-        }
-
-        // Procura se já existe algum projeto em savedServerProjects que aponta para este mesmo arquivo R2
-        const existingProject = savedServerProjects.find((p: any) => {
-          if (!p || !p.videoUrl) return false;
-          if (p.fileKey === key) return true;
-          const urlClean = p.videoUrl.split('?')[0];
-          if (urlClean.endsWith(`/${key}`) || urlClean.includes(encodeURIComponent(key)) || urlClean.includes(rawFileName)) return true;
-          if (p.secondaryVideoUrl && p.secondaryVideoUrl.includes(encodeURIComponent(key))) return true;
-          return false;
-        });
-
-        if (existingProject) {
-          // Atualiza as URLs do projeto existente e garante a referência à fileKey
-          const updatedProj = {
-            ...existingProject,
-            fileKey: key,
-            videoUrl: streamUrl,
-            secondaryVideoUrl: presignedUrl,
-          };
-          cleanProjectsMap.set(key, updatedProj);
-        } else {
-          // Cria um único novo projeto para este vídeo R2
-          let formattedTitle = rawFileName
-            .replace(/\.[^/.]+$/, '') // remove extensão
-            .replace(/^\d+-/, '')     // remove timestamp inicial
-            .replace(/[-_]+/g, ' ')   // substitui hífens por espaço
-            .trim();
-
-          if (!formattedTitle || formattedTitle.length < 2) {
-            formattedTitle = `Vídeo R2 (${rawFileName})`;
-          } else {
-            formattedTitle = formattedTitle.charAt(0).toUpperCase() + formattedTitle.slice(1);
-          }
-
-          const newProject = {
-            id: `vsl-r2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-            title: formattedTitle,
-            description: `Vídeo importado automaticamente do Cloudflare R2 (${rawFileName})`,
-            fileKey: key,
-            videoUrl: streamUrl,
-            secondaryVideoUrl: presignedUrl,
-            aspectRatio: '16:9',
-            durationSeconds: 180,
-            createdAt: obj.LastModified ? new Date(obj.LastModified).toISOString() : new Date().toISOString(),
-            totalViews: 0,
-            plays: 0,
-            completionCount: 0,
-            avgWatchTimeSeconds: 0,
-            pitchConfig: {
-              pitchTimeSeconds: 60,
-              ctaText: 'COMPRAR COM DESCONTO EXCLUSIVO',
-              ctaUrl: 'https://seuempreendimento.com.br/checkout',
-              ctaButtonColor: '#059669',
-              pulseEffect: true,
-              showCountdown: true,
-            },
-            retentionData: [],
-            events: [],
-          };
-          cleanProjectsMap.set(key, newProject);
-          newAddedCount++;
-        }
-      }
-
-      // Mantém apenas projetos customizados não-mockups
-      const nonR2Projects = savedServerProjects.filter((p: any) => {
-        const url = p.videoUrl || '';
-        const isMock = url.includes('gtv-videos-bucket') ||
-                       url.includes('commondatastorage.googleapis.com') ||
-                       url.includes('BigBuckBunny') ||
-                       p.id === 'vsl-001' || p.id === 'vsl-002' || p.id === 'vsl-003';
-        if (isMock) return false;
-        if (p.fileKey && !activeKeys.has(p.fileKey)) return false;
-        if (p.id?.startsWith('vsl-r2-')) return false; // Já processados pelo cleanProjectsMap
-        return true;
-      });
-
-      const baseProjects = [...Array.from(cleanProjectsMap.values()), ...nonR2Projects];
-
-      persistProjectsToServer(baseProjects);
-
-      return res.json({
-        success: true,
-        message: `Sincronização concluída! ${videoObjects.length} vídeo(s) únicos no R2 (${newAddedCount} novo(s) importado(s)).`,
-        totalInR2: videoObjects.length,
-        newAdded: newAddedCount,
-        projects: baseProjects,
-      });
-    } catch (err: any) {
-      console.error('[R2 SYNC ROUTE] Erro ao sincronizar bucket R2:', err);
-      return res.status(500).json({
-        success: false,
-        error: err?.message || 'Falha ao sincronizar os vídeos do Cloudflare R2.',
-      });
+    const result = await syncR2BucketInternal(req.body || req.query);
+    if (result.success) {
+      return res.json(result);
+    } else {
+      return res.status(500).json(result);
     }
   });
 
