@@ -525,27 +525,53 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
 
           {/* Overlay de Erro no Vídeo */}
           {hasVideoError && (
-            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-md p-6 text-center">
-              <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mb-3">
+            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-md p-5 sm:p-6 text-center overflow-y-auto">
+              <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mb-2.5 shrink-0">
                 <Flame className="w-6 h-6" />
               </div>
-              <h4 className="text-white font-extrabold text-sm sm:text-base mb-2">
-                Vídeo Indisponível ou Formato Não Suportado
+
+              <h4 className="text-white font-black text-sm sm:text-base mb-1.5">
+                {activeVideoSrc?.toLowerCase().endsWith('.mov')
+                  ? '⚠️ Formato .MOV Não Compatível no Navegador'
+                  : 'Vídeo Indisponível ou Bloqueado no R2'}
               </h4>
-              <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-4">
-                {videoErrorMessage ||
-                  'Não foi possível carregar este vídeo. Verifique se a URL pública do Cloudflare R2 está correta e se o bucket possui Acesso Público (R2.dev Domain ou Subdomínio Ativo).'}
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
+
+              {activeVideoSrc?.toLowerCase().endsWith('.mov') ? (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 max-w-md text-left mb-3.5 space-y-1.5">
+                  <p className="text-amber-300 font-bold text-xs flex items-center gap-1.5">
+                    <span>📱 Vídeo do iPhone (.MOV / HEVC) Detectado</span>
+                  </p>
+                  <p className="text-neutral-300 text-[11px] leading-relaxed">
+                    Navegadores como o <strong>Google Chrome no Windows e Android</strong> não possuem suporte nativo para decodificar vídeos <code>.MOV</code> do iPhone (codec H.265/HEVC).
+                  </p>
+                  <p className="text-amber-200/90 text-[11px] font-semibold">
+                    💡 Solução: Salve ou converta seu vídeo para formato <strong>.MP4 (codec H.264)</strong> antes de subir para o R2.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
+                  O navegador não conseguiu reproduzir o vídeo. Verifique se o bucket no Cloudflare R2 possui <strong>Acesso Público (R2.dev Subdomain ou Domínio Personalizado)</strong> ativado nas configurações.
+                </p>
+              )}
+
+              {/* URL do Vídeo para Depuração */}
+              {activeVideoSrc && (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 max-w-md w-full mb-4 text-left font-mono text-[10px] text-neutral-400 truncate select-all">
+                  <span className="text-neutral-500 font-sans font-semibold mr-1">URL:</span>
+                  {activeVideoSrc}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
                 {activeVideoSrc && (
                   <a
                     href={activeVideoSrc}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-2 border border-neutral-700 transition-all"
+                    className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 border border-neutral-700 transition-all shadow-sm"
                   >
-                    <ExternalLink className="w-4 h-4 text-indigo-400" />
-                    <span>Testar Link Direto</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Abrir Link Direto em Nova Aba</span>
                   </a>
                 )}
                 <button
@@ -555,9 +581,9 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                       videoRef.current.load();
                     }
                   }}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg transition-all cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg transition-all cursor-pointer"
                 >
-                  <RotateCcw className="w-4 h-4" />
+                  <RotateCcw className="w-3.5 h-3.5" />
                   <span>Tentar Novamente</span>
                 </button>
               </div>

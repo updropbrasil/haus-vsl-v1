@@ -211,9 +211,12 @@ export const CloudflareR2Config: React.FC<CloudflareR2ConfigProps> = ({ onAddPro
 
       if (res.success) {
         setUploadedPublicUrl(res.publicUrl);
+        const isMov = file.name.toLowerCase().endsWith('.mov');
         setTestStatus({
           success: true,
-          message: '✅ Arquivo enviado e hospedado no Cloudflare R2 com sucesso!',
+          message: isMov
+            ? '✅ Arquivo .MOV enviado com sucesso! Nota: vídeos .MOV do iPhone (codec HEVC) só rodam no Safari/Mac. Recomenda-se usar .MP4 para suporte em todos os navegadores (Chrome/Windows).'
+            : '✅ Arquivo enviado e hospedado no Cloudflare R2 com sucesso!',
         });
       } else {
         // Fallback para Blob local no navegador
