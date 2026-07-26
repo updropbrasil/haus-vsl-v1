@@ -48,6 +48,67 @@ import {
   Layout,
 } from 'lucide-react';
 
+function getRouteInfo(allProjects: VslProject[]): { isVslRoute: boolean; matchedProjectId?: string } {
+  if (typeof window === 'undefined') {
+    return { isVslRoute: false };
+  }
+
+  const pathname = window.location.pathname;
+  const searchParams = new URLSearchParams(window.location.search);
+  const vslQuery = searchParams.get('vsl') || searchParams.get('id');
+  const hash = window.location.hash;
+
+  const isVslPath =
+    pathname.startsWith('/vsl') ||
+    pathname.startsWith('/embed') ||
+    !!vslQuery ||
+    hash.includes('/vsl');
+
+  if (!isVslPath) {
+    return { isVslRoute: false };
+  }
+
+  let rawParam = '';
+  if (pathname.startsWith('/vsl/')) {
+    rawParam = pathname.replace(/^\/vsl\//, '');
+  } else if (pathname.startsWith('/embed/')) {
+    rawParam = pathname.replace(/^\/embed\//, '');
+  } else if (vslQuery) {
+    rawParam = vslQuery;
+  } else if (hash.includes('/vsl/')) {
+    rawParam = hash.split('/vsl/')[1] || '';
+  }
+
+  rawParam = rawParam.split('?')[0].split('#')[0].trim().toLowerCase();
+
+  if (!rawParam) {
+    return { isVslRoute: true };
+  }
+
+  const match = allProjects.find(
+    (p) =>
+      p.id.toLowerCase() === rawParam ||
+      p.landingPageConfig?.slug?.toLowerCase() === rawParam
+  );
+
+  if (match) {
+    return { isVslRoute: true, matchedProjectId: match.id };
+  }
+
+  const partialMatch = allProjects.find(
+    (p) =>
+      (p.landingPageConfig?.slug && rawParam.includes(p.landingPageConfig.slug.toLowerCase())) ||
+      (p.landingPageConfig?.slug && p.landingPageConfig.slug.toLowerCase().includes(rawParam)) ||
+      rawParam.includes(p.id.toLowerCase())
+  );
+
+  if (partialMatch) {
+    return { isVslRoute: true, matchedProjectId: partialMatch.id };
+  }
+
+  return { isVslRoute: true };
+}
+
 export default function App() {
   const [projects, setProjects] = useState<VslProject[]>(() => {
     try {
@@ -61,8 +122,28 @@ export default function App() {
     return INITIAL_VSL_PROJECTS;
   });
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || 'vsl-001');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
+    const routeInfo = getRouteInfo(projects);
+    return routeInfo.matchedProjectId || projects[0]?.id || 'vsl-001';
+  });
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      const searchParams = new URLSearchParams(window.location.search);
+      const hash = window.location.hash;
+      if (
+        pathname.startsWith('/vsl') ||
+        pathname.startsWith('/embed') ||
+        searchParams.has('vsl') ||
+        searchParams.has('id') ||
+        hash.includes('/vsl')
+      ) {
+        return 'public_landing';
+      }
+    }
+    return 'dashboard';
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserSession | null>(() => getLocalUserSession());
@@ -105,7 +186,12 @@ export default function App() {
       const realProjects = await fetchProjectsFromSupabase();
       if (realProjects && realProjects.length > 0) {
         setProjects(realProjects);
-        setSelectedProjectId(realProjects[0].id);
+        const routeInfo = getRouteInfo(realProjects);
+        if (routeInfo.matchedProjectId) {
+          setSelectedProjectId(routeInfo.matchedProjectId);
+        } else if (!window.location.pathname.startsWith('/vsl')) {
+          setSelectedProjectId(realProjects[0].id);
+        }
       }
 
       // 3. Hidrata credenciais do Cloudflare R2
@@ -126,6 +212,28 @@ export default function App() {
 
     hydrateAllCredentialsAndData();
   }, [currentUser]);
+
+  // Listener de Mudanças na URL para Navegação Direta de VSL Pública
+  useEffect(() => {
+    function processUrlRoute() {
+      const routeInfo = getRouteInfo(projects);
+      if (routeInfo.isVslRoute) {
+        if (routeInfo.matchedProjectId) {
+          setSelectedProjectId(routeInfo.matchedProjectId);
+        }
+        setActiveTab('public_landing');
+      }
+    }
+
+    processUrlRoute();
+
+    window.addEventListener('popstate', processUrlRoute);
+    window.addEventListener('hashchange', processUrlRoute);
+    return () => {
+      window.removeEventListener('popstate', processUrlRoute);
+      window.removeEventListener('hashchange', processUrlRoute);
+    };
+  }, [projects]);
 
   // Handler: Limpar Dados de Exemplo (Mockup)
   const handleClearMockData = () => {
@@ -299,12 +407,19 @@ export default function App() {
 
   // MODO PÁGINA DE VENDAS PÚBLICA (LANDING PAGE COM VSL INTEGRADO)
   if (activeTab === 'public_landing') {
+    const isDirectVisitor = !currentUser && window.location.pathname.startsWith('/vsl');
+
     return (
       <VslPublicLandingPage
         project={selectedProject}
         onTrackEvent={handleTrackEvent}
-        onBackToDashboard={() => setActiveTab('dashboard')}
-        isPreviewMode={true}
+        onBackToDashboard={() => {
+          if (window.location.pathname.startsWith('/vsl') || window.location.pathname.startsWith('/embed')) {
+            window.history.pushState({}, '', '/');
+          }
+          setActiveTab('dashboard');
+        }}
+        isPreviewMode={!isDirectVisitor}
       />
     );
   }
@@ -314,7 +429,12 @@ export default function App() {
       {/* SIDEBAR NAVEGAÇÃO */}
       <Sidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          if (window.location.pathname.startsWith('/vsl') || window.location.pathname.startsWith('/embed')) {
+            window.history.pushState({}, '', '/');
+          }
+          setActiveTab(tab);
+        }}
         vslCount={projects.length}
         onOpenNewVslModal={() => setIsModalOpen(true)}
       />
@@ -328,7 +448,11 @@ export default function App() {
           onSelectProject={(proj) => setSelectedProjectId(proj.id)}
           onOpenNewVslModal={() => setIsModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onOpenLandingPagePreview={() => setActiveTab('public_landing')}
+          onOpenLandingPagePreview={() => {
+            const slug = selectedProject?.landingPageConfig?.slug || selectedProject?.id || '';
+            window.history.pushState({}, '', `/vsl/${slug}`);
+            setActiveTab('public_landing');
+          }}
           currentUser={currentUser}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -607,7 +731,11 @@ export default function App() {
               <LandingPageCustomizer
                 project={selectedProject}
                 onSaveConfig={handleSaveLandingPageConfig}
-                onPreviewLandingPage={() => setActiveTab('public_landing')}
+                onPreviewLandingPage={() => {
+                  const slug = selectedProject?.landingPageConfig?.slug || selectedProject?.id || '';
+                  window.history.pushState({}, '', `/vsl/${slug}`);
+                  setActiveTab('public_landing');
+                }}
               />
             </div>
           )}
