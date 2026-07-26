@@ -251,18 +251,14 @@ async function startServer() {
         },
       });
 
-      const parallelUploads3 = new Upload({
-        client: s3Client,
-        params: {
-          Bucket: bucketName,
-          Key: fileKey,
-          Body: file.buffer,
-          ContentType: file.mimetype || 'video/mp4',
-        },
-        leavePartsOnError: false,
+      const command = new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileKey,
+        Body: file.buffer,
+        ContentType: file.mimetype || 'video/mp4',
       });
 
-      await parallelUploads3.done();
+      await s3Client.send(command);
 
       const publicUrl = `${publicDomain}/${fileKey}`;
       console.log(`[R2 UPLOAD ROUTE] Upload concluído via server proxy! URL pública: ${publicUrl}`);

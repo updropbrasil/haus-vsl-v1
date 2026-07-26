@@ -329,16 +329,41 @@ export async function uploadFileToR2(
     };
   }
 
-  // 1. Tenta envio através do Servidor Backend Express (imune a CORS do navegador)
-  log(`📡 Transmitindo arquivo via servidor backend Node.js (imune a bloqueios de CORS)...`);
+  // 1. Tenta envio direto via Presigned URL (Melhor performance, progresso em tempo real)
+  log(`⚡ Gerando URL pré-assinada de upload direto para o Cloudflare R2...`);
+  const presignResult = await uploadViaPresignedUrl(file, cleanCreds, onProgress, log);
+  if (presignResult.success) {
+    return presignResult;
+  }
+
+  log(`⚠️ Upload direto indisponível (${presignResult.error}). Alternando para o servidor backend proxy...`);
+
+  // 2. Fallback: Servidor Backend Proxy Express
+  log(`📡 Transmitindo arquivo via servidor backend Node.js...`);
   const proxyResult = await uploadViaServerProxy(file, cleanCreds, onProgress, log);
   if (proxyResult.success) {
     return proxyResult;
   }
 
-  log(`⚠️ Servidor proxy indisponível (${proxyResult.error}). Tentando envio com URL Pré-assinada...`);
+  log(`❌ Falha no upload R2: ${proxyResult.error || 'Não foi possível completar o envio.'}`);
+  return {
+    success: false,
+    publicUrl: defaultPublicUrl,
+    error: proxyResult.error || presignResult.error || 'Falha no upload para o Cloudflare R2.',
+  };
+}
 
-  // 2. Fallback: Presigned URL direto do navegador
+/**
+ * Função auxiliar para upload direto via URL Pré-assinada
+ */
+async function uploadViaPresignedUrl(
+  file: File,
+  cleanCreds: CleanR2Config,
+  onProgress?: (percentage: number) => void,
+  log?: (msg: string) => void
+): Promise<{ success: boolean; publicUrl: string; error?: string }> {
+  const defaultPublicUrl = `${cleanCreds.publicDomain}/${Date.now()}-${file.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-')}`;
+
   let presignData: any = {};
   try {
     let presignRes = await fetch('/api/r2/presign', {
@@ -376,72 +401,71 @@ export async function uploadFileToR2(
       const presignText = await presignRes.text();
       presignData = presignText ? JSON.parse(presignText) : {};
     }
-  } catch {
-    presignData = {};
-  }
+  } catch {}
 
   if (!presignData || !presignData.presignedUrl) {
     try {
-      log(`⚡ Gerando URL pré-assinada diretamente no navegador...`);
+      if (log) log(`⚡ Gerando URL pré-assinada diretamente no navegador...`);
       presignData = await generatePresignedUrlClientSide(
         cleanCreds,
         file.name,
         file.type || 'video/mp4'
       );
     } catch (err: any) {
-      log(`⚠️ Falha ao gerar URL pré-assinada no navegador: ${err?.message}`);
+      if (log) log(`⚠️ Falha ao gerar URL pré-assinada no navegador: ${err?.message}`);
     }
   }
 
-  if (presignData && presignData.presignedUrl) {
-    return new Promise((resolve) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', presignData.presignedUrl);
-      xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+  if (!presignData || !presignData.presignedUrl) {
+    return {
+      success: false,
+      publicUrl: defaultPublicUrl,
+      error: 'Não foi possível gerar a URL pré-assinada de upload.',
+    };
+  }
 
-      if (xhr.upload) {
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable && e.total > 0) {
-            const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
-            if (onProgress) onProgress(pct);
-            log(`⬆️ Transmitindo para o Cloudflare R2: ${pct}% (${(e.loaded / (1024 * 1024)).toFixed(1)} MB / ${(e.total / (1024 * 1024)).toFixed(1)} MB)`);
-          }
-        };
-      }
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', presignData.presignedUrl);
+    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
 
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          if (onProgress) onProgress(100);
-          log(`✅ Upload concluído com sucesso e salvo no R2!`);
-          log(`🔗 URL pública do vídeo: ${presignData.publicUrl}`);
-          resolve({ success: true, publicUrl: presignData.publicUrl });
-        } else {
-          log(`❌ Erro HTTP ${xhr.status} no upload direto R2.`);
-          resolve({
-            success: false,
-            publicUrl: defaultPublicUrl,
-            error: `O Cloudflare R2 retornou status ${xhr.status}. Verifique se o Token R2 possui permissão de escrita.`,
-          });
+    if (xhr.upload) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          const pct = Math.min(99, Math.round((e.loaded / e.total) * 100));
+          if (onProgress) onProgress(pct);
+          if (log) log(`⬆️ Transmitindo diretamente para R2: ${pct}% (${(e.loaded / (1024 * 1024)).toFixed(1)} MB / ${(e.total / (1024 * 1024)).toFixed(1)} MB)`);
         }
       };
+    }
 
-      xhr.onerror = () => {
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (onProgress) onProgress(100);
+        if (log) log(`✅ Upload concluído com sucesso no Cloudflare R2!`);
+        if (log) log(`🔗 URL pública do vídeo: ${presignData.publicUrl}`);
+        resolve({ success: true, publicUrl: presignData.publicUrl });
+      } else {
+        if (log) log(`❌ HTTP ${xhr.status} no upload direto R2.`);
         resolve({
           success: false,
           publicUrl: defaultPublicUrl,
-          error: 'Erro de CORS no navegador ao enviar diretamente para o Cloudflare R2.',
+          error: `O Cloudflare R2 retornou status ${xhr.status}.`,
         });
-      };
+      }
+    };
 
-      xhr.send(file);
-    });
-  }
+    xhr.onerror = () => {
+      if (log) log(`⚠️ Bloqueio de CORS ou rede no envio direto R2.`);
+      resolve({
+        success: false,
+        publicUrl: defaultPublicUrl,
+        error: 'Bloqueio de CORS ou conexão no envio direto.',
+      });
+    };
 
-  return {
-    success: false,
-    publicUrl: defaultPublicUrl,
-    error: 'Não foi possível realizar o upload para o Cloudflare R2.',
-  };
+    xhr.send(file);
+  });
 }
 
 /**
