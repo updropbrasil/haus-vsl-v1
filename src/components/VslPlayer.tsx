@@ -62,25 +62,16 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
   const [savedTime, setSavedTime] = useState<number | null>(null);
   const [showResumeBanner, setShowResumeBanner] = useState(false);
 
-  // Fallback URL state (Se o vídeo principal falhar por adblocker ou rede, alterna entre streaming e domínio público)
+  // Fallback URL state
   const [usingFallbackUrl, setUsingFallbackUrl] = useState(false);
-  const [usingStreamUrl, setUsingStreamUrl] = useState(false);
   const [hasVideoError, setHasVideoError] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
+  // CORREÇÃO CRUCIAL: Utiliza SEMPRE a URL direta e pública do Cloudflare (CDN).
+  // Removemos o intermediário /api/r2/stream que causava travamento no Coolify.
   let activeVideoSrc = project.videoUrl;
-  if (project.fileKey && !usingFallbackUrl) {
-    activeVideoSrc = `/api/r2/stream?key=${encodeURIComponent(project.fileKey)}`;
-  } else if (usingStreamUrl) {
-    const rawKey = project.fileKey || (project.videoUrl?.includes('key=')
-      ? decodeURIComponent(project.videoUrl.split('key=')[1]?.split('&')[0] || '')
-      : project.videoUrl?.replace(/^https?:\/\/[^/]+\//, ''));
-    if (rawKey) {
-      activeVideoSrc = `/api/r2/stream?key=${encodeURIComponent(rawKey)}`;
-    } else if (project.secondaryVideoUrl) {
-      activeVideoSrc = project.secondaryVideoUrl;
-    }
-  } else if (usingFallbackUrl && project.secondaryVideoUrl) {
+
+  if (usingFallbackUrl && project.secondaryVideoUrl) {
     activeVideoSrc = project.secondaryVideoUrl;
   }
 
@@ -88,9 +79,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     if (!usingFallbackUrl && project.secondaryVideoUrl && project.secondaryVideoUrl !== activeVideoSrc) {
       console.warn('⚠️ URL principal do vídeo falhou. Alternando para URL secundária!');
       setUsingFallbackUrl(true);
-    } else if (!usingStreamUrl) {
-      console.warn('⚠️ Alternando para a rota de streaming direto do servidor Express!');
-      setUsingStreamUrl(true);
     } else if (retryCount < 2) {
       console.warn(`🔄 Tentando recarregar o vídeo (tentativa ${retryCount + 1})...`);
       setRetryCount((prev) => prev + 1);
@@ -151,18 +139,15 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     if (e) e.stopPropagation();
     if (!videoRef.current) return;
 
-    // 1. Reiniciar o vídeo do começo (00:00)
     videoRef.current.currentTime = 0;
     setCurrentTime(0);
     setIsPitchUnlocked(false);
 
-    // 2. Desmutar o áudio (Volume 100%)
     videoRef.current.muted = false;
     setIsMuted(false);
     setVolume(1);
     videoRef.current.volume = 1;
 
-    // 3. Garantir Reprodução
     videoRef.current
       .play()
       .then(() => {
@@ -182,7 +167,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
         console.warn('Erro ao reproduzir vídeo:', err);
       });
 
-    // 4. Ativar Tela Cheia (Fullscreen Native)
     if (containerRef.current) {
       if (containerRef.current.requestFullscreen) {
         containerRef.current.requestFullscreen().catch(() => {});
@@ -194,7 +178,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     }
   };
 
-  // Load saved progress from localStorage if exists
   useEffect(() => {
     try {
       const stored = localStorage.getItem(`vsl_progress_${project.id}`);
@@ -210,7 +193,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     }
   }, [project.id, duration]);
 
-  // Handle video duration and auto-detect intrinsic video dimensions
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDuration(videoRef.current.duration);
@@ -237,7 +219,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     }
   };
 
-  // Toggle Play/Pause
   const togglePlay = () => {
     if (!videoRef.current) return;
 
@@ -266,7 +247,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
       videoRef.current.pause();
       setIsPlaying(false);
 
-      // Track pause event
       const currentSec = Math.round(videoRef.current.currentTime);
       const pct = Math.round((currentSec / (duration || 1)) * 100);
       onTrackEvent({
@@ -283,7 +263,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     }
   };
 
-  // Time Update & Tracking Logic
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
 
@@ -293,7 +272,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     const videoDur = duration || videoRef.current.duration || 1;
     const currentPercentage = (currentSec / videoDur) * 100;
 
-    // Pitch Unlock check (Apenas desbloqueia se o usuário já clicou para assistir com som)
     if (
       project.pitchConfig &&
       hasStartedPlaying &&
@@ -312,7 +290,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
       });
     }
 
-    // Check milestones
     const milestones = [
       { key: 'milestone_10', pct: 10 },
       { key: 'milestone_25', pct: 25 },
@@ -411,7 +388,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // BARRA DE PROGRESSO COM GATILHO PSICOLÓGICO DE ACELERAÇÃO (0-10%)
   const realPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
   let visualPercentage = realPercentage;
   if (realPercentage <= 10) {
@@ -420,9 +396,8 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
     visualPercentage = 12.5 + ((realPercentage - 10) * (87.5 / 90));
   }
   const clampedVisualPercentage = Math.min(100, Math.max(0, visualPercentage));
-  const secondsUntilPitch = Math.max(0, Math.ceil(project.pitchConfig.pitchTimeSeconds - currentTime));
+  const secondsUntilPitch = Math.max(0, Math.ceil(project.pitchConfig?.pitchTimeSeconds - currentTime || 0));
 
-  // ASPECT RATIO STYLING CLASSES
   const getContainerAspectClass = () => {
     switch (currentAspect) {
       case '9:16':
@@ -439,7 +414,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
 
   return (
     <div className="w-full flex flex-col items-center space-y-4">
-      {/* BARRA DE SELEÇÃO DE FORMATO DO VÍDEO (Apenas no Painel do Admin) */}
       {!isPublicView && (
         <div className="w-full max-w-4xl flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-neutral-900 border border-neutral-800 text-xs">
           <div className="flex items-center gap-2">
@@ -487,7 +461,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
         </div>
       )}
 
-      {/* Container Principal do Player VSL (Permite Fullscreen Native) */}
       <div
         ref={containerRef}
         className={`relative rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800 group transition-all duration-300 flex flex-col justify-between ${getContainerAspectClass()}`}
@@ -497,7 +470,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           setShowSpeedMenu(false);
         }}
       >
-        {/* Banner de Aviso de Aceleração Psicológica Ativa (Apenas Admin) */}
         {!isPublicView && (
           <div className="absolute top-3 right-3 z-30 flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 text-[11px] font-medium backdrop-blur-md shadow-lg pointer-events-none">
             <Zap className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
@@ -505,7 +477,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           </div>
         )}
 
-        {/* Botão para Sair da Tela Cheia quando Ativo */}
         {isFullscreen && (
           <button
             onClick={toggleFullscreen}
@@ -516,7 +487,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           </button>
         )}
 
-        {/* Video HTML5 Tag Area */}
         <div
           className={`relative w-full h-full bg-black flex-1 flex items-center justify-center overflow-hidden ${
             !isPublicView ? 'cursor-pointer' : ''
@@ -556,7 +526,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             <source src={activeVideoSrc} />
           </video>
 
-          {/* Overlay de Erro no Vídeo com Botão de Recarregar */}
           {hasVideoError && (
             <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-md p-5 sm:p-6 text-center overflow-y-auto">
               <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mb-2.5 shrink-0">
@@ -564,29 +533,13 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
               </div>
 
               <h4 className="text-white font-extrabold text-sm sm:text-base mb-1.5">
-                Aguardando Conexão do Vídeo
+                Erro ao Carregar o Vídeo
               </h4>
 
               <p className="text-neutral-300 text-xs max-w-md leading-relaxed mb-3">
-                O vídeo está em processo de sincronização com o servidor. Clique no botão abaixo para tentar reconectar instantaneamente.
+                Não foi possível conectar ao servidor de hospedagem. Verifique se a URL R2 é pública ou se o formato é suportado (.mp4).
               </p>
 
-              <button
-                onClick={() => {
-                  setHasVideoError(false);
-                  setRetryCount(0);
-                  setUsingStreamUrl(true);
-                  if (videoRef.current) {
-                    videoRef.current.load();
-                    videoRef.current.play().catch(() => {});
-                  }
-                }}
-                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg transition-all cursor-pointer mb-3"
-              >
-                Tentar Reconectar Vídeo
-              </button>
-
-              {/* URL do Vídeo para Depuração */}
               {activeVideoSrc && (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 max-w-md w-full mb-3 text-left font-mono text-[10px] text-neutral-400 truncate select-all">
                   <span className="text-neutral-500 font-sans font-semibold mr-1">URL:</span>
@@ -609,19 +562,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
 
                 <button
                   onClick={() => {
-                    setUsingStreamUrl((prev) => !prev);
-                    setHasVideoError(false);
-                    setRetryCount(0);
-                    setTimeout(() => videoRef.current?.load(), 100);
-                  }}
-                  className="px-3.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs flex items-center gap-1.5 border border-neutral-700 transition-all cursor-pointer"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Alternar Rota ({usingStreamUrl ? 'URL Direta' : 'Proxy Stream'})</span>
-                </button>
-
-                <button
-                  onClick={() => {
                     setHasVideoError(false);
                     setRetryCount(0);
                     if (videoRef.current) {
@@ -637,7 +577,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           )}
 
-          {/* Overlay de Áudio / Smart Unmute com Tela Cheia Automática */}
           {showSmartUnmuteOverlay && !hasVideoError && (
             <div
               onClick={handleUnmuteAndFullscreen}
@@ -661,7 +600,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           )}
 
-          {/* Banner de Resume de Onde Parou */}
           {showResumeBanner && savedTime && !isPlaying && (
             <div className="absolute top-4 left-4 z-30 max-w-md p-3.5 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-100 shadow-xl flex items-center justify-between gap-3 animate-slide-down">
               <div className="flex items-center gap-2.5">
@@ -696,7 +634,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           )}
 
-          {/* Big Center Play Icon Overlay on Pause */}
           {!isPlaying && !showSmartUnmuteOverlay && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
               <div className="w-16 h-16 rounded-full bg-neutral-900/90 border border-neutral-700 flex items-center justify-center text-indigo-400 shadow-2xl transform hover:scale-110 transition-all">
@@ -705,8 +642,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           )}
 
-          {/* OVERLAY DO BOTÃO DA OFERTA (DENTRO DO PLAYER - COMPACTO E ENQUADRADO PARA MOBILE) */}
-          {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && (
+          {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && project.pitchConfig && (
             <div className="absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-sm sm:max-w-md w-[92%] p-1 sm:p-2 animate-scale-up pointer-events-auto">
               <div className="flex flex-col items-center gap-1.5 text-center">
                 <a
@@ -742,14 +678,12 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
           )}
         </div>
 
-        {/* BARRA DE CONTROLES CUSTOMIZADA VSL (Exibida Apenas no Dashboard Admin para Testes) */}
         {!isPublicView ? (
           <div
             className={`px-4 pt-2 pb-3 bg-neutral-950 transition-opacity duration-300 shrink-0 ${
               isHovered || !isPlaying ? 'opacity-100' : 'opacity-80 md:opacity-0'
             }`}
           >
-            {/* BARRA DE PROGRESSO VISUAL COM GATILHO PSICOLÓGICO */}
             <div className="relative mb-3 group/timeline cursor-pointer" onClick={handleSeek}>
               {realPercentage <= 10 && realPercentage > 0 && (
                 <div
@@ -784,7 +718,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
               )}
             </div>
 
-            {/* Botões e Status de Controle */}
             <div className="flex items-center justify-between text-neutral-300 text-xs font-medium">
               <div className="flex items-center gap-3">
                 <button
@@ -865,7 +798,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           </div>
         ) : (
-          /* Linha Fina de Progresso Visual Não-Interativa para a VSL Pública */
           <div className="w-full h-1 bg-neutral-900 relative overflow-hidden">
             <div
               className="h-full bg-indigo-500 transition-all duration-200"
@@ -875,16 +807,14 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
         )}
       </div>
 
-      {/* SEÇÃO DO CTA DO PITCH EM TELA NORMAL / MOBILE */}
       <div className="w-full max-w-4xl transition-all duration-700 ease-out">
-        {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted ? (
+        {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && project.pitchConfig ? (
           <div
             className="p-4 sm:p-8 rounded-2xl bg-neutral-900/90 border border-emerald-500/40 text-center animate-fade-in flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group"
             style={{
               boxShadow: `0 0 40px ${project.pitchConfig.ctaButtonColor || '#059669'}25`,
             }}
           >
-            {/* Ambient Background Glow */}
             <div
               className="absolute -inset-1 opacity-20 blur-xl pointer-events-none transition-all duration-500 group-hover:opacity-30"
               style={{ backgroundColor: project.pitchConfig.ctaButtonColor || '#059669' }}
@@ -920,7 +850,6 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
                 </p>
               )}
 
-              {/* Selo de Garantia e Segurança para Conversão Mobile */}
               <div className="flex items-center justify-center gap-3 text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-800/80 w-full">
                 <span className="flex items-center gap-1 text-emerald-400 font-bold">
                   🔒 Compra 100% Segura
@@ -931,7 +860,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
             </div>
           </div>
         ) : (
-          !isPublicView && (
+          !isPublicView && project.pitchConfig && (
             <div className="p-4 rounded-lg bg-neutral-900 border border-neutral-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-neutral-400 text-xs">
               <div className="flex items-center gap-2">
                 <Lock className="w-4 h-4 text-amber-400 shrink-0" />
@@ -957,8 +886,7 @@ export const VslPlayer: React.FC<VslPlayerProps> = ({
         )}
       </div>
 
-      {/* BARRA FIXA STICKY CTA NO RODAPÉ MOBILE (Alta Conversão para 98% de Tráfego Mobile) */}
-      {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && isPublicView && (
+      {isPitchUnlocked && hasStartedPlaying && !showSmartUnmuteOverlay && !isMuted && isPublicView && project.pitchConfig && (
         <div className="fixed bottom-0 left-0 right-0 z-50 p-2.5 sm:hidden bg-neutral-950/95 backdrop-blur-xl border-t border-neutral-800/90 shadow-[0_-10px_25px_rgba(0,0,0,0.8)] animate-fade-in pointer-events-auto">
           <a
             href={project.pitchConfig.ctaUrl}
