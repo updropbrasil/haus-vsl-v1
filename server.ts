@@ -72,7 +72,7 @@ async function startServer() {
     accessKeyId: '92171e9b90720446e4b4fdfc32f62ac1',
     secretAccessKey: 'f9a116ed1aaaf09ad84114b72edd7a4b57c4c2ab1dda9e7942f820a05d6cff91',
     bucketName: 'jasondias-videos',
-    folderPath: 'vsl-haus',
+    folderPath: '',
     publicDomain: 'https://pub-8e2cb656649243e49a2cdd3f4ca9d4c.r2.dev',
     isConfigured: true,
   };
@@ -209,38 +209,48 @@ async function startServer() {
         credentials: { accessKeyId, secretAccessKey },
       });
 
-      console.log(`[R2 SYNC] Escaneando pasta "${targetFolder}" no bucket "${bucketName}" no Cloudflare R2...`);
+      console.log(`[R2 SYNC] Escaneando todos os arquivos no bucket "${bucketName}" no Cloudflare R2 com paginação...`);
 
-      const listParams: any = { Bucket: bucketName, MaxKeys: 1000 };
-      if (targetFolder) {
-        listParams.Prefix = `${targetFolder}/`;
-      }
-
-      let listRes = await s3Client.send(new ListObjectsV2Command(listParams));
-      let contents = listRes.Contents || [];
-
-      if (contents.length === 0 && targetFolder) {
-        const fallbackCmd = new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1000 });
-        const fallbackRes = await s3Client.send(fallbackCmd);
-        contents = (fallbackRes.Contents || []).filter((item) =>
-          item.Key && item.Key.toLowerCase().includes(targetFolder.toLowerCase())
-        );
-      }
+      let contents: any[] = [];
+      let continuationToken: string | undefined = undefined;
+      do {
+        try {
+          const listCmd: any = { Bucket: bucketName };
+          if (continuationToken) listCmd.ContinuationToken = continuationToken;
+          const listRes: any = await s3Client.send(new ListObjectsV2Command(listCmd));
+          if (listRes.Contents && Array.isArray(listRes.Contents)) {
+            contents.push(...listRes.Contents);
+          }
+          continuationToken = listRes.IsTruncated ? listRes.NextContinuationToken : undefined;
+        } catch (e) {
+          break;
+        }
+      } while (continuationToken);
 
       const videoExtensions = ['.mp4', '.mov', '.webm', '.m4v', '.avi', '.mkv'];
-      const videoObjects = contents.filter((item) => {
+      const rawVideoObjects = contents.filter((item) => {
         if (!item.Key) return false;
         const lower = item.Key.toLowerCase();
-        const isVideo = videoExtensions.some((ext) => lower.endsWith(ext));
-        if (!isVideo) return false;
-        if (targetFolder) {
-          const targetLower = targetFolder.toLowerCase();
-          return lower.startsWith(targetLower + '/') || lower.includes(targetLower);
-        }
-        return true;
+        return videoExtensions.some((ext) => lower.endsWith(ext));
       });
 
-      console.log(`[R2 SYNC] Encontrados ${videoObjects.length} vídeo(s) na pasta "${targetFolder}".`);
+      // Agrupa .mov e .mp4 do mesmo vídeo para dar preferência ao .mp4 universal
+      const videoMap = new Map<string, any>();
+      rawVideoObjects.forEach((obj) => {
+        if (!obj.Key) return;
+        const baseKey = obj.Key.replace(/\.(mp4|mov|webm|m4v|avi|mkv)$/i, '');
+        if (!videoMap.has(baseKey)) {
+          videoMap.set(baseKey, obj);
+        } else {
+          // Se já tem .mov e o atual é .mp4, substitui pelo .mp4
+          if (obj.Key.toLowerCase().endsWith('.mp4')) {
+            videoMap.set(baseKey, obj);
+          }
+        }
+      });
+
+      const videoObjects = Array.from(videoMap.values());
+      console.log(`[R2 SYNC] Encontrados ${videoObjects.length} vídeo(s) únicos no bucket R2 (em todas as pastas).`);
 
       const activeKeys = new Set(videoObjects.map((obj) => obj.Key).filter(Boolean));
       const cleanProjectsMap = new Map<string, any>();
@@ -349,18 +359,8 @@ async function startServer() {
     }
   }
 
-  // Executa auto-sincronização no boot do servidor
-  syncR2BucketInternal().then((res) => {
-    if (res.success) {
-      console.log(`[R2 AUTO-SYNC BOOT SUCCESS] ${res.projects?.length || 0} vídeos sincronizados.`);
-    }
-  });
-
-  // API Route: Buscar Todos os Projetos do Servidor (Auto-sincroniza sempre com o R2)
-  app.get('/api/projects', async (req, res) => {
-    try {
-      await syncR2BucketInternal();
-    } catch (e) {}
+  // API Route: Buscar Todos os Projetos do Servidor
+  app.get('/api/projects', (req, res) => {
     return res.json({
       success: true,
       projects: savedServerProjects,

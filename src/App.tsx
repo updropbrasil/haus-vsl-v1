@@ -295,37 +295,17 @@ export default function App() {
         } catch {}
       }
 
-      // 3. Tenta sincronizar automaticamente os vídeos do Cloudflare R2 enviando credenciais
+      // 3. Busca projetos salvos no servidor Node.js
       let syncedProjects: VslProject[] | null = null;
       try {
-        const syncRes = await fetch('/api/r2/sync-videos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...(r2Creds || {}),
-            folderPath: r2Creds?.folderPath || 'vsl-haus',
-          }),
-        });
-        if (syncRes.ok) {
-          const syncData = await syncRes.json();
-          if (syncData?.projects && Array.isArray(syncData.projects) && syncData.projects.length > 0) {
-            syncedProjects = syncData.projects;
+        const res = await fetch('/api/projects');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+            syncedProjects = data.projects;
           }
         }
       } catch {}
-
-      // 4. Se não obteve do R2, busca projetos salvos no servidor Node.js
-      if (!syncedProjects || syncedProjects.length === 0) {
-        try {
-          const res = await fetch('/api/projects');
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.projects && Array.isArray(data.projects) && data.projects.length > 0) {
-              syncedProjects = data.projects;
-            }
-          }
-        } catch {}
-      }
 
       // Filtra e remove estritamente qualquer vídeo de exemplo ou mockup
       let activeList: VslProject[] = (syncedProjects || []).filter((p: any) => {
@@ -711,17 +691,17 @@ export default function App() {
                   <div className="px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-800 text-xs flex items-center gap-2">
                     <span className="text-neutral-400">Ponto do Pitch:</span>{' '}
                     <strong className="text-amber-400 font-mono">
-                      {Math.floor(selectedProject.pitchConfig.pitchTimeSeconds / 60)
+                      {Math.floor((selectedProject?.pitchConfig?.pitchTimeSeconds ?? 60) / 60)
                         .toString()
                         .padStart(2, '0')}
-                      :{(selectedProject.pitchConfig.pitchTimeSeconds % 60).toString().padStart(2, '0')}
+                      :{((selectedProject?.pitchConfig?.pitchTimeSeconds ?? 60) % 60).toString().padStart(2, '0')}
                     </strong>
                   </div>
 
                   <div className="px-3.5 py-2 rounded-lg bg-neutral-950 border border-neutral-800 text-xs flex items-center gap-1.5 max-w-xs">
                     <span className="text-neutral-400 shrink-0">Botão CTA:</span>{' '}
-                    <strong className="text-emerald-400 truncate" title={selectedProject.pitchConfig.ctaText}>
-                      "{selectedProject.pitchConfig.ctaText}"
+                    <strong className="text-emerald-400 truncate" title={selectedProject?.pitchConfig?.ctaText || 'COMPRAR AGORA'}>
+                      "{selectedProject?.pitchConfig?.ctaText || 'COMPRAR AGORA'}"
                     </strong>
                   </div>
 
@@ -885,8 +865,8 @@ export default function App() {
                               {Math.floor(proj.durationSeconds / 60)}m {proj.durationSeconds % 60}s
                             </span>
                             <span className="px-2 py-0.5 rounded bg-amber-500/90 text-neutral-950">
-                              Pitch: {Math.floor(proj.pitchConfig.pitchTimeSeconds / 60)}:
-                              {(proj.pitchConfig.pitchTimeSeconds % 60).toString().padStart(2, '0')}
+                              Pitch: {Math.floor((proj?.pitchConfig?.pitchTimeSeconds ?? 60) / 60)}:
+                              {((proj?.pitchConfig?.pitchTimeSeconds ?? 60) % 60).toString().padStart(2, '0')}
                             </span>
                           </div>
                         </div>
